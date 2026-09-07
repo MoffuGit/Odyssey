@@ -57,7 +57,7 @@ pub fn renderFrame(renderer: *Renderer, handle: *Handle, frame_state: *FrameStat
     var pass = frame.renderPass(&.{
         .{
             .target = target,
-            .clear_color = .{ 0.0, 0.0, 0.0, 1.0 },
+            .clear_color = .{ 1.0, 1.0, 1.0, 1.0 },
         },
     });
     defer pass.complete();
