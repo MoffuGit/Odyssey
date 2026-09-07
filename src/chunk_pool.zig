@@ -256,8 +256,8 @@ pub const ChunkAllocator = struct {
         pool.threadSafeFree(memory.ptr[0..pool.chunk_size], self.io);
     }
 
-    fn reset(self: *ChunkAllocator) void {
-        for (self.pools) |pool| pool.reset();
+    pub fn reset(self: *ChunkAllocator) void {
+        for (self.pools) |*pool| pool.reset();
     }
 };
 
