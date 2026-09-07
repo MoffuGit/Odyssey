@@ -403,7 +403,7 @@ pub const Block = struct {
         .axis = .x,
         .touched_frame = 0,
         .sizing = @splat(.none),
-        .shrink = @splat(1.0),
+        .shrink = @splat(0.0),
         .color = @splat(0.0),
         .flags = .{},
         .size = @splat(0.0),
@@ -444,7 +444,7 @@ pub const Block = struct {
 
         self.axis = .x;
         self.sizing = @splat(.none);
-        self.shrink = @splat(1.0);
+        self.shrink = @splat(0.0);
         self.color = @splat(0.0);
         self.flags = .{};
     }
@@ -561,7 +561,7 @@ pub const Block = struct {
                 var children = current.children.first;
                 while (children) |child| : (children = child.next) {
                     used += child.size[axis];
-                    available += child.size[axis] * (1.0 - child.shrink[axis]);
+                    available += child.size[axis] * child.shrink[axis];
                 }
 
                 const overflow = used - allowed;
@@ -571,7 +571,7 @@ pub const Block = struct {
 
                     while (children) |child| : (children = child.next) {
                         child.size[axis] -= child.size[axis] *
-                            (1.0 - child.shrink[axis]) *
+                            child.shrink[axis] *
                             clamp(overflow / available, 0, 1);
                     }
                 }

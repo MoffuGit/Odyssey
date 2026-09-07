@@ -193,7 +193,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         const red = try view.buildBlock(.{}, null);
         red.color = .{ 1.0, 0.0, 0.0, 1.0 };
 
-        try view.shrink(0.0);
+        try view.shrink(1.0);
 
         const green = try view.blockFromFmt("green@@@{}", .{1}, .{ .mouse = true });
         const signal = view.signalForBlock(green);
@@ -208,13 +208,13 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             try view.pushAttr(.{ .parent = green });
             defer view.popAttr(.parent);
 
-            try view.shrink(0.0);
+            try view.shrink(1.0);
             _ = try view.spacer(.grow);
 
             try view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
             _ = try view.spacer(.{ .fixed = 50 });
 
-            try view.shrink(0.0);
+            try view.shrink(1.0);
             _ = try view.spacer(.grow);
         }
 
