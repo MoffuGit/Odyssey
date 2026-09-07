@@ -129,7 +129,7 @@ pub fn finish(self: *View) void {
 pub fn signalForBlock(self: *View, block: *Block) Signal {
     const flags = block.flags;
 
-    var signal: Signal = .none;
+    var signal: Signal = .{ .flags = .none, .block = block };
 
     const mouse = self.mouse;
     const rect = block.rect;
@@ -137,14 +137,14 @@ pub fn signalForBlock(self: *View, block: *Block) Signal {
     if (rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
         rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
     {
-        signal.mouseover = true;
+        signal.flags.mouseover = true;
     }
 
     if (flags.mouse and
         rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
         rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
     {
-        signal.hovered = true;
+        signal.flags.hovered = true;
     }
 
     return signal;
@@ -316,15 +316,7 @@ pub fn shrink(self: *View, per: f32) void {
     }
 }
 
-pub fn row(self: *View) void {
-    self.nextAttr(.{ .axis = .x });
-}
-
-pub fn col(self: *View) void {
-    self.nextAttr(.{ .axis = .y });
-}
-
-pub fn spacer(self: *View, sizing: Sizing) Signal {
+pub fn spacer(self: *View, sizing: Sizing) *Block {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
@@ -333,8 +325,7 @@ pub fn spacer(self: *View, sizing: Sizing) Signal {
         .y => self.nextAttr(.{ .height = sizing }),
     }
 
-    const block = self.buildBlock(.{}, null);
-    return self.signalForBlock(block);
+    return self.buildBlock(.{}, null);
 }
 
 const Stacks = TaggedLinkedList(union(enum) {
@@ -376,14 +367,17 @@ pub const Sizing = union(enum) {
     percent: f32,
 };
 
-pub const Signal = packed struct {
-    const none: Signal = .{
-        .hovered = false,
-        .mouseover = false,
-    };
+pub const Signal = struct {
+    block: *Block,
+    flags: packed struct {
+        const none: @This() = .{
+            .hovered = false,
+            .mouseover = false,
+        };
 
-    hovered: bool,
-    mouseover: bool,
+        hovered: bool,
+        mouseover: bool,
+    },
 };
 
 pub const Block = struct {

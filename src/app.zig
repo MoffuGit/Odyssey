@@ -198,7 +198,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         const green = try view.blockFromFmt("green@@@{}", .{1}, .{ .mouse = true });
         const signal = view.signalForBlock(green);
 
-        if (signal.hovered) {
+        if (signal.flags.hovered) {
             green.color = .{ 0.0, 1.0, 0.5, 1.0 };
         } else {
             green.color = .{ 0.0, 1.0, 0.0, 1.0 };
@@ -211,8 +211,24 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             view.shrink(1.0);
             _ = view.spacer(.grow);
 
-            view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
-            _ = view.spacer(.{ .fixed = 50 });
+            view.nextAttr(.{ .axis = .y });
+
+            const col = view.spacer(.{ .fixed = 50 });
+            {
+                view.pushAttr(.{ .parent = col });
+                defer view.popAttr(.parent);
+
+                view.shrink(1.0);
+                _ = view.spacer(.grow);
+
+                view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
+                view.nextAttr(.{ .axis = .y });
+
+                _ = view.spacer(.{ .fixed = 50 });
+
+                view.shrink(1.0);
+                _ = view.spacer(.grow);
+            }
 
             view.shrink(1.0);
             _ = view.spacer(.grow);
