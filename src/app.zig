@@ -81,14 +81,14 @@ pub const WindowState = struct {
     next: ?*WindowState = null,
 
     win: Window,
-    render_handle: Handle,
+    handle: Handle,
     view: View,
 
     pub fn init(self: *WindowState, app: *App, opts: win.Options) !void {
         self.* = .{
             .view = undefined,
             .win = undefined,
-            .render_handle = undefined,
+            .handle = undefined,
         };
 
         try self.view.init(app.gpa);
@@ -99,7 +99,7 @@ pub const WindowState = struct {
 
         self.win.setUserdata(app);
 
-        try self.render_handle.init(
+        try self.handle.init(
             &app.renderer,
             &self.win,
             app.gpa,
@@ -108,7 +108,7 @@ pub const WindowState = struct {
     }
 
     pub fn deinit(self: *WindowState) void {
-        self.render_handle.deinit();
+        self.handle.deinit();
         self.win.deinit();
         self.view.deinit();
     }
@@ -224,8 +224,8 @@ pub fn renderFrame(app: *App, window_state: *WindowState, sync: bool) !void {
         blue.color = .{ 0.0, 0.0, 1.0, 1.0 };
     }
 
-    const frame = window_state.render_handle.nextFrame();
-    errdefer window_state.render_handle.releaseFrame();
+    const frame = window_state.handle.nextFrame();
+    errdefer window_state.handle.releaseFrame();
 
     const size = try window_state.win.size();
 
@@ -242,5 +242,5 @@ pub fn renderFrame(app: *App, window_state: *WindowState, sync: bool) !void {
         });
     }
 
-    render.renderFrame(&app.renderer, &window_state.render_handle, frame, sync);
+    render.renderFrame(&app.renderer, &window_state.handle, frame, sync);
 }
