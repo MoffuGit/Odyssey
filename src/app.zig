@@ -188,14 +188,12 @@ pub fn renderFrame(app: *App, window_state: *WindowState, sync: bool) !void {
         try view.pushAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
         defer view.popAttrs(&.{ .width, .height });
 
-        try view.nextAttrs(&.{
-            .{ .width = .{ .fixed = 100 } },
-        });
+        try view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
         const red = try view.buildBlock(.{}, null);
         red.color = .{ 1.0, 0.0, 0.0, 1.0 };
 
-        try view.nextAttrs(&.{ .{ .height_shrink = 0.0 }, .{ .width_shrink = 0.0 } });
+        try view.shrink(0.0);
 
         const green = try view.blockFromFmt("green@@@{}", .{1}, .{ .mouse = true });
         const signal = view.signalForBlock(green);
@@ -210,19 +208,17 @@ pub fn renderFrame(app: *App, window_state: *WindowState, sync: bool) !void {
             try view.pushAttr(.{ .parent = green });
             defer view.popAttr(.parent);
 
-            try view.nextAttrs(&.{ .{ .height_shrink = 0.0 }, .{ .width_shrink = 0.0 } });
+            try view.shrink(0.0);
             _ = try view.spacer(.grow);
 
             try view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
             _ = try view.spacer(.{ .fixed = 50 });
 
-            try view.nextAttrs(&.{ .{ .height_shrink = 0.0 }, .{ .width_shrink = 0.0 } });
+            try view.shrink(0.0);
             _ = try view.spacer(.grow);
         }
 
-        try view.nextAttrs(&.{
-            .{ .width = .{ .fixed = 100 } },
-        });
+        try view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
         const blue = try view.buildBlock(.{}, null);
         blue.color = .{ 0.0, 0.0, 1.0, 1.0 };
@@ -233,9 +229,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, sync: bool) !void {
 
     const size = try window_state.win.size();
 
-    try frame.uniform(.{
-        .viewport_size = .{ size.w, size.h },
-    });
+    try frame.uniform(.{ .viewport_size = .{ size.w, size.h } });
 
     var box = window_state.view.root;
     while (box) |current| : (box = current.nextPreOrder()) {

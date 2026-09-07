@@ -285,6 +285,16 @@ fn popFlagged(self: *View) void {
     }
 }
 
+pub fn shrink(self: *View, per: f32) !void {
+    const parent = self.stacks.get(.parent).head;
+    const axis: Axis = if (parent) |p| p.value.axis else .x;
+
+    switch (axis) {
+        .x => try self.nextAttr(.{ .width_shrink = per }),
+        .y => try self.nextAttr(.{ .height_shrink = per }),
+    }
+}
+
 pub fn spacer(self: *View, sizing: Sizing) !Signal {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
