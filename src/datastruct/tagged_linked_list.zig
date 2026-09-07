@@ -10,6 +10,8 @@ pub fn TaggedLinkedList(Union: type) type {
 
         pub const Value = Union;
 
+        pub const NODE_SIZE = @sizeOf(Value) + @sizeOf(?*Value);
+
         pub const Tag = info.tag_type orelse
             @compileError("TaggedLinkedList requires a tagged union");
 

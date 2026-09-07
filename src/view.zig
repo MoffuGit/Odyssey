@@ -30,7 +30,7 @@ mouse: [2]f32,
 
 frame: u64,
 frame_arenas: [2]heap.ArenaAllocator,
-frame_pools: [2]chunk_pool.ChunkAllocator,
+frame_chunks: [2]chunk_pool.ChunkAllocator,
 
 stacks: Stacks,
 pop_flags: u64,
@@ -48,7 +48,7 @@ pub fn init(self: *View, gpa: Allocator) !void {
         .block_count = 0,
         .frame = 0,
         .frame_arenas = .{ .init(gpa), .init(gpa) },
-        .frame_pools = undefined,
+        .frame_chunks = undefined,
         .stacks = .empty,
         .pop_flags = 0,
         .chunks = undefined,
@@ -57,9 +57,9 @@ pub fn init(self: *View, gpa: Allocator) !void {
     const arena = self.arena.allocator();
     errdefer self.arena.deinit();
 
-    for (&self.frame_pools) |*pool| {
+    for (&self.frame_chunks) |*pool| {
         try pool.init(arena, &.{
-            .{ .capacity = 50, .chunk_size = @sizeOf(Stacks.Value) + @sizeOf(?*Stacks.Value) },
+            .{ .capacity = 50, .chunk_size = Stacks.NODE_SIZE },
         });
     }
 
@@ -87,14 +87,14 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
         self.mouse = .{ mouse.x, mouse.y };
     }
 
-    try self.nextAttrs(&.{
+    self.nextAttrs(&.{
         .{ .width = .{ .fixed = size.w } },
         .{ .height = .{ .fixed = size.h } },
     });
 
     self.root = try self.buildBlock(.{}, null);
 
-    try self.pushAttr(.{ .parent = self.root.? });
+    self.pushAttr(.{ .parent = self.root.? });
 }
 
 pub fn finish(self: *View) void {
@@ -119,8 +119,10 @@ pub fn finish(self: *View) void {
 
     self.frame += 1;
 
-    const arena_index = self.frame % self.frame_arenas.len;
-    _ = self.frame_arenas[arena_index].reset(.retain_capacity);
+    const frame_index = self.frame % self.frame_arenas.len;
+
+    _ = self.frame_arenas[frame_index].reset(.retain_capacity);
+    _ = self.frame_chunks[frame_index].reset();
 }
 
 pub fn signalForBlock(self: *View, block: *Block) Signal {
@@ -237,14 +239,14 @@ pub fn buildBlock(self: *View, flags: Block.Flags, optional_key: ?u64) !*Block {
     return block;
 }
 
-pub fn pushAttr(self: *View, attr: Attribute) !void {
-    const arena = self.frameArena();
+pub fn pushAttr(self: *View, attr: Attribute) void {
+    const chunks = self.frameChunks();
 
     switch (attr) {
         inline else => |value, flag| {
             assert(self.pop_flags & stackFlag(flag) == 0);
 
-            const node = try arena.create(Node(flag));
+            const node = chunks.create(Node(flag)) catch @panic("Frame chunks overflow");
             node.* = .{ .value = value };
             self.stacks.prepend(flag, node);
         },
@@ -256,25 +258,29 @@ pub fn popAttr(self: *View, comptime field: StackField) void {
     if (self.stacks.pop(field) == null) unreachable;
 }
 
-pub fn nextAttr(self: *View, attr: Attribute) !void {
-    try self.pushAttr(attr);
+pub fn nextAttr(self: *View, attr: Attribute) void {
+    self.pushAttr(attr);
     self.flagStack(meta.activeTag(attr));
 }
 
-pub fn pushAttrs(self: *View, attrs: []const Attribute) !void {
-    for (attrs) |attr| try self.pushAttr(attr);
+pub fn pushAttrs(self: *View, attrs: []const Attribute) void {
+    for (attrs) |attr| self.pushAttr(attr);
 }
 
 pub fn popAttrs(self: *View, comptime fields: []const StackField) void {
     inline for (fields) |field| self.popAttr(field);
 }
 
-pub fn nextAttrs(self: *View, attrs: []const Attribute) !void {
-    for (attrs) |attr| try self.nextAttr(attr);
+pub fn nextAttrs(self: *View, attrs: []const Attribute) void {
+    for (attrs) |attr| self.nextAttr(attr);
 }
 
 fn frameArena(self: *View) Allocator {
     return self.frame_arenas[self.frame % self.frame_arenas.len].allocator();
+}
+
+fn frameChunks(self: *View) Allocator {
+    return self.frame_chunks[self.frame % self.frame_arenas.len].allocator();
 }
 
 fn reset(self: *View) void {
@@ -298,22 +304,22 @@ fn popFlagged(self: *View) void {
     }
 }
 
-pub fn shrink(self: *View, per: f32) !void {
+pub fn shrink(self: *View, per: f32) void {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
     switch (axis) {
-        .x => try self.nextAttr(.{ .width_shrink = per }),
-        .y => try self.nextAttr(.{ .height_shrink = per }),
+        .x => self.nextAttr(.{ .width_shrink = per }),
+        .y => self.nextAttr(.{ .height_shrink = per }),
     }
 }
 
-pub fn row(self: *View) !void {
-    try self.nextAttr(.{ .axis = .x });
+pub fn row(self: *View) void {
+    self.nextAttr(.{ .axis = .x });
 }
 
-pub fn col(self: *View) !void {
-    try self.nextAttr(.{ .axis = .y });
+pub fn col(self: *View) void {
+    self.nextAttr(.{ .axis = .y });
 }
 
 pub fn spacer(self: *View, sizing: Sizing) !Signal {
@@ -321,8 +327,8 @@ pub fn spacer(self: *View, sizing: Sizing) !Signal {
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
     switch (axis) {
-        .x => try self.nextAttr(.{ .width = sizing }),
-        .y => try self.nextAttr(.{ .height = sizing }),
+        .x => self.nextAttr(.{ .width = sizing }),
+        .y => self.nextAttr(.{ .height = sizing }),
     }
 
     const block = try self.buildBlock(.{}, null);
@@ -647,11 +653,11 @@ test "Basic Operations" {
     const cache = &view.cache[key % view.cache.len];
 
     try view.begin(window, false);
-    try view.nextAttr(.{ .width = .{ .fixed = 10 } });
+    view.nextAttr(.{ .width = .{ .fixed = 10 } });
     _ = try view.buildBlock(.{}, null);
-    try view.nextAttr(.{ .width = .{ .fixed = 40 } });
+    view.nextAttr(.{ .width = .{ .fixed = 40 } });
     const first = try view.buildBlock(.{}, key);
-    try view.pushAttr(.{ .parent = first });
+    view.pushAttr(.{ .parent = first });
     _ = try view.buildBlock(.{}, null);
     view.popAttr(.parent);
     view.finish();
@@ -662,7 +668,7 @@ test "Basic Operations" {
     try testing.expectEqual(@as(u8, 1), first.child_count);
 
     try view.begin(window, false);
-    try view.nextAttrs(&.{
+    view.nextAttrs(&.{
         .{ .axis = .y },
         .{ .width = .{ .fixed = 50 } },
     });
@@ -721,15 +727,16 @@ test "Fixed Layout" {
     defer view.deinit();
 
     try view.begin(window, false);
-    try view.pushAttr(.{ .flags = .allowOverflow });
+    view.pushAttr(.{ .flags = .allowOverflow });
 
-    try view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
+    view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
     const wrapper = try view.buildBlock(.{}, null);
-    try view.pushAttr(.{ .parent = wrapper });
+    view.pushAttr(.{ .parent = wrapper });
 
-    try view.nextAttrs(&.{ .{ .width = .{ .fixed = 800 } }, .{ .height = .{ .fixed = 900 } } });
+    view.nextAttrs(&.{ .{ .width = .{ .fixed = 800 } }, .{ .height = .{ .fixed = 900 } } });
     const first = try view.buildBlock(.{}, null);
-    try view.nextAttrs(&.{ .{ .width = .{ .fixed = 120 } }, .{ .height = .{ .fixed = 120 } } });
+
+    view.nextAttrs(&.{ .{ .width = .{ .fixed = 120 } }, .{ .height = .{ .fixed = 120 } } });
     const second = try view.buildBlock(.{}, null);
 
     view.popAttr(.parent);
@@ -749,24 +756,24 @@ test "Percent Layout" {
     defer view.deinit();
 
     try view.begin(window, false);
-    try view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
+    view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
     const parent = try view.buildBlock(.{}, null);
-    try view.pushAttr(.{ .parent = parent });
+    view.pushAttr(.{ .parent = parent });
 
-    try view.nextAttrs(&.{
+    view.nextAttrs(&.{
         .{ .width = .{ .fixed = 100 } },
         .{ .height = .grow },
     });
     const first = try view.buildBlock(.{}, null);
 
-    try view.nextAttrs(&.{
+    view.nextAttrs(&.{
         .{ .width = .grow },
         .{ .height = .grow },
         .{ .width_shrink = 1.0 },
     });
     const middle = try view.buildBlock(.{}, null);
 
-    try view.nextAttrs(&.{
+    view.nextAttrs(&.{
         .{ .width = .{ .fixed = 100 } },
         .{ .height = .grow },
     });
@@ -790,11 +797,11 @@ test "Grow Layout" {
     defer view.deinit();
 
     try view.begin(window, false);
-    try view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 300 } } });
+    view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 300 } } });
     const parent = try view.buildBlock(.{}, null);
-    try view.pushAttr(.{ .parent = parent });
+    view.pushAttr(.{ .parent = parent });
 
-    try view.nextAttrs(&.{ .{ .width = .{ .percent = 0.5 } }, .{ .height = .grow } });
+    view.nextAttrs(&.{ .{ .width = .{ .percent = 0.5 } }, .{ .height = .grow } });
     const child = try view.buildBlock(.{}, null);
     view.popAttr(.parent);
     view.finish();
@@ -810,21 +817,21 @@ test "fit sizing resolves from descendants" {
     defer view.deinit();
 
     try view.begin(window, false);
-    try view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit }, .{ .axis = .y } });
+    view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit }, .{ .axis = .y } });
     const parent = try view.buildBlock(.{}, null);
-    try view.pushAttr(.{ .parent = parent });
+    view.pushAttr(.{ .parent = parent });
 
-    try view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit } });
+    view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit } });
     const first = try view.buildBlock(.{}, null);
-    try view.pushAttr(.{ .parent = first });
+    view.pushAttr(.{ .parent = first });
 
-    try view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
+    view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
     _ = try view.buildBlock(.{}, null);
-    try view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
+    view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
     _ = try view.buildBlock(.{}, null);
     view.popAttr(.parent);
 
-    try view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 450 } } });
+    view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 450 } } });
     const second = try view.buildBlock(.{}, null);
     view.popAttr(.parent);
     view.finish();

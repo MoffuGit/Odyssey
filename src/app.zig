@@ -185,15 +185,15 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         try view.begin(window_state.win, resize);
         defer view.finish();
 
-        try view.pushAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
+        view.pushAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
         defer view.popAttrs(&.{ .width, .height });
 
-        try view.nextAttr(.{ .width = .{ .fixed = 100 } });
+        view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
         const red = try view.buildBlock(.{}, null);
         red.color = .{ 1.0, 0.0, 0.0, 1.0 };
 
-        try view.shrink(1.0);
+        view.shrink(1.0);
 
         const green = try view.blockFromFmt("green@@@{}", .{1}, .{ .mouse = true });
         const signal = view.signalForBlock(green);
@@ -205,20 +205,20 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         }
 
         {
-            try view.pushAttr(.{ .parent = green });
+            view.pushAttr(.{ .parent = green });
             defer view.popAttr(.parent);
 
-            try view.shrink(1.0);
+            view.shrink(1.0);
             _ = try view.spacer(.grow);
 
-            try view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
+            view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
             _ = try view.spacer(.{ .fixed = 50 });
 
-            try view.shrink(1.0);
+            view.shrink(1.0);
             _ = try view.spacer(.grow);
         }
 
-        try view.nextAttr(.{ .width = .{ .fixed = 100 } });
+        view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
         const blue = try view.buildBlock(.{}, null);
         blue.color = .{ 0.0, 0.0, 1.0, 1.0 };
