@@ -190,7 +190,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
         view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
-        const red = try view.buildBlock(.{}, null);
+        const red = view.buildBlock(.{}, null);
         red.color = .{ 1.0, 0.0, 0.0, 1.0 };
 
         view.shrink(1.0);
@@ -209,18 +209,18 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             defer view.popAttr(.parent);
 
             view.shrink(1.0);
-            _ = try view.spacer(.grow);
+            _ = view.spacer(.grow);
 
             view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
-            _ = try view.spacer(.{ .fixed = 50 });
+            _ = view.spacer(.{ .fixed = 50 });
 
             view.shrink(1.0);
-            _ = try view.spacer(.grow);
+            _ = view.spacer(.grow);
         }
 
         view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
-        const blue = try view.buildBlock(.{}, null);
+        const blue = view.buildBlock(.{}, null);
         blue.color = .{ 0.0, 0.0, 1.0, 1.0 };
     }
 

@@ -59,7 +59,8 @@ pub fn init(self: *View, gpa: Allocator) !void {
 
     for (&self.frame_chunks) |*pool| {
         try pool.init(arena, &.{
-            .{ .capacity = 50, .chunk_size = Stacks.NODE_SIZE },
+            .{ .capacity = 2048, .chunk_size = Stacks.NODE_SIZE },
+            .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
         });
     }
 
@@ -92,7 +93,7 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
         .{ .height = .{ .fixed = size.h } },
     });
 
-    self.root = try self.buildBlock(.{}, null);
+    self.root = self.buildBlock(.{}, null);
 
     self.pushAttr(.{ .parent = self.root.? });
 }
@@ -177,7 +178,7 @@ pub fn blockFromString(self: *View, string: []const u8, flags: Block.Flags) !*Bl
         break :key Wyhash.hash(0, chunk);
     };
 
-    return try self.buildBlock(flags, key);
+    return self.buildBlock(flags, key);
 }
 
 pub fn getBlock(self: *View, key: u64) ?*Block {
@@ -202,12 +203,15 @@ pub fn cacheBlock(self: *View, block: *Block, key: u64) void {
     list.append(&block.cache);
 }
 
-pub fn buildBlock(self: *View, flags: Block.Flags, optional_key: ?u64) !*Block {
+pub fn buildBlock(self: *View, flags: Block.Flags, optional_key: ?u64) *Block {
+    const frame_chunks = self.frameChunks();
+    const chunks = self.chunks.allocator();
+
     const block = bkl: {
         if (optional_key) |key| {
             if (self.getBlock(key)) |cached| {
                 if (cached.touched_frame == self.frame) {
-                    const block = try self.frameArena().create(Block);
+                    const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
                     block.* = .empty;
 
                     break :bkl block;
@@ -217,9 +221,7 @@ pub fn buildBlock(self: *View, flags: Block.Flags, optional_key: ?u64) !*Block {
 
                 break :bkl cached;
             } else {
-                const chunks = self.chunks.allocator();
-
-                const block = try chunks.create(Block);
+                const block = chunks.create(Block) catch @panic("Block Chunk Overflow");
                 block.* = .empty;
 
                 self.cacheBlock(block, key);
@@ -227,7 +229,7 @@ pub fn buildBlock(self: *View, flags: Block.Flags, optional_key: ?u64) !*Block {
                 break :bkl block;
             }
         } else {
-            const block = try self.frameArena().create(Block);
+            const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
             block.* = .empty;
 
             break :bkl block;
@@ -322,7 +324,7 @@ pub fn col(self: *View) void {
     self.nextAttr(.{ .axis = .y });
 }
 
-pub fn spacer(self: *View, sizing: Sizing) !Signal {
+pub fn spacer(self: *View, sizing: Sizing) Signal {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
@@ -331,7 +333,7 @@ pub fn spacer(self: *View, sizing: Sizing) !Signal {
         .y => self.nextAttr(.{ .height = sizing }),
     }
 
-    const block = try self.buildBlock(.{}, null);
+    const block = self.buildBlock(.{}, null);
     return self.signalForBlock(block);
 }
 
@@ -654,11 +656,11 @@ test "Basic Operations" {
 
     try view.begin(window, false);
     view.nextAttr(.{ .width = .{ .fixed = 10 } });
-    _ = try view.buildBlock(.{}, null);
+    _ = view.buildBlock(.{}, null);
     view.nextAttr(.{ .width = .{ .fixed = 40 } });
-    const first = try view.buildBlock(.{}, key);
+    const first = view.buildBlock(.{}, key);
     view.pushAttr(.{ .parent = first });
-    _ = try view.buildBlock(.{}, null);
+    _ = view.buildBlock(.{}, null);
     view.popAttr(.parent);
     view.finish();
 
@@ -672,7 +674,7 @@ test "Basic Operations" {
         .{ .axis = .y },
         .{ .width = .{ .fixed = 50 } },
     });
-    const second = try view.buildBlock(.{}, key);
+    const second = view.buildBlock(.{}, key);
 
     try testing.expectEqual(first, second);
     try testing.expectEqual([2]f32{ 40, 0 }, second.size);
@@ -730,14 +732,14 @@ test "Fixed Layout" {
     view.pushAttr(.{ .flags = .allowOverflow });
 
     view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
-    const wrapper = try view.buildBlock(.{}, null);
+    const wrapper = view.buildBlock(.{}, null);
     view.pushAttr(.{ .parent = wrapper });
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 800 } }, .{ .height = .{ .fixed = 900 } } });
-    const first = try view.buildBlock(.{}, null);
+    const first = view.buildBlock(.{}, null);
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 120 } }, .{ .height = .{ .fixed = 120 } } });
-    const second = try view.buildBlock(.{}, null);
+    const second = view.buildBlock(.{}, null);
 
     view.popAttr(.parent);
     view.popAttr(.flags);
@@ -757,27 +759,27 @@ test "Percent Layout" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
-    const parent = try view.buildBlock(.{}, null);
+    const parent = view.buildBlock(.{}, null);
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{
         .{ .width = .{ .fixed = 100 } },
         .{ .height = .grow },
     });
-    const first = try view.buildBlock(.{}, null);
+    const first = view.buildBlock(.{}, null);
 
     view.nextAttrs(&.{
         .{ .width = .grow },
         .{ .height = .grow },
         .{ .width_shrink = 1.0 },
     });
-    const middle = try view.buildBlock(.{}, null);
+    const middle = view.buildBlock(.{}, null);
 
     view.nextAttrs(&.{
         .{ .width = .{ .fixed = 100 } },
         .{ .height = .grow },
     });
-    const last = try view.buildBlock(.{}, null);
+    const last = view.buildBlock(.{}, null);
 
     view.popAttr(.parent);
     view.finish();
@@ -798,11 +800,11 @@ test "Grow Layout" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 300 } } });
-    const parent = try view.buildBlock(.{}, null);
+    const parent = view.buildBlock(.{}, null);
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{ .{ .width = .{ .percent = 0.5 } }, .{ .height = .grow } });
-    const child = try view.buildBlock(.{}, null);
+    const child = view.buildBlock(.{}, null);
     view.popAttr(.parent);
     view.finish();
 
@@ -818,21 +820,21 @@ test "fit sizing resolves from descendants" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit }, .{ .axis = .y } });
-    const parent = try view.buildBlock(.{}, null);
+    const parent = view.buildBlock(.{}, null);
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit } });
-    const first = try view.buildBlock(.{}, null);
+    const first = view.buildBlock(.{}, null);
     view.pushAttr(.{ .parent = first });
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
-    _ = try view.buildBlock(.{}, null);
+    _ = view.buildBlock(.{}, null);
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
-    _ = try view.buildBlock(.{}, null);
+    _ = view.buildBlock(.{}, null);
     view.popAttr(.parent);
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 450 } } });
-    const second = try view.buildBlock(.{}, null);
+    const second = view.buildBlock(.{}, null);
     view.popAttr(.parent);
     view.finish();
 
