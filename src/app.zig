@@ -222,7 +222,6 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 _ = view.spacer(.grow);
 
                 view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
-                view.nextAttr(.{ .axis = .y });
 
                 _ = view.spacer(.{ .fixed = 50 });
 
