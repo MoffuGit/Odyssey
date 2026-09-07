@@ -30,6 +30,7 @@ mouse: [2]f32,
 
 frame: u64,
 frame_arenas: [2]heap.ArenaAllocator,
+frame_pools: [2]chunk_pool.ChunkAllocator,
 
 stacks: Stacks,
 pop_flags: u64,
@@ -47,6 +48,7 @@ pub fn init(self: *View, gpa: Allocator) !void {
         .block_count = 0,
         .frame = 0,
         .frame_arenas = .{ .init(gpa), .init(gpa) },
+        .frame_pools = undefined,
         .stacks = .empty,
         .pop_flags = 0,
         .chunks = undefined,
@@ -54,6 +56,12 @@ pub fn init(self: *View, gpa: Allocator) !void {
 
     const arena = self.arena.allocator();
     errdefer self.arena.deinit();
+
+    for (&self.frame_pools) |*pool| {
+        try pool.init(arena, &.{
+            .{ .capacity = 50, .chunk_size = @sizeOf(Stacks.Value) + @sizeOf(?*Stacks.Value) },
+        });
+    }
 
     self.cache = try arena.alloc(DoublyLinkedList(Cache), 2048);
     @memset(self.cache, .empty);
@@ -298,6 +306,14 @@ pub fn shrink(self: *View, per: f32) !void {
         .x => try self.nextAttr(.{ .width_shrink = per }),
         .y => try self.nextAttr(.{ .height_shrink = per }),
     }
+}
+
+pub fn row(self: *View) !void {
+    try self.nextAttr(.{ .axis = .x });
+}
+
+pub fn col(self: *View) !void {
+    try self.nextAttr(.{ .axis = .y });
 }
 
 pub fn spacer(self: *View, sizing: Sizing) !Signal {
@@ -630,7 +646,7 @@ test "Basic Operations" {
     const key: u64 = 42;
     const cache = &view.cache[key % view.cache.len];
 
-    try view.begin(window);
+    try view.begin(window, false);
     try view.nextAttr(.{ .width = .{ .fixed = 10 } });
     _ = try view.buildBlock(.{}, null);
     try view.nextAttr(.{ .width = .{ .fixed = 40 } });
@@ -645,7 +661,7 @@ test "Basic Operations" {
     try testing.expectEqual([2]f32{ 10, 0 }, first.position);
     try testing.expectEqual(@as(u8, 1), first.child_count);
 
-    try view.begin(window);
+    try view.begin(window, false);
     try view.nextAttrs(&.{
         .{ .axis = .y },
         .{ .width = .{ .fixed = 50 } },
@@ -663,7 +679,7 @@ test "Basic Operations" {
 
     try testing.expectEqual(@as(usize, 1), cache.len());
 
-    try view.begin(window);
+    try view.begin(window, false);
     view.finish();
 
     try testing.expect(cache.is_empty());
@@ -675,24 +691,24 @@ test "Hash Block" {
     try view.init(testing.allocator);
     defer view.deinit();
 
-    try view.begin(window);
+    try view.begin(window, false);
     _ = try view.blockFromString("First label@@@identity", .{});
     const first = view.root.?.children.last.?;
     try testing.expectEqual(Wyhash.hash(0, "identity"), first.key.?);
     view.finish();
 
-    try view.begin(window);
+    try view.begin(window, false);
     _ = try view.blockFromString("Different label@@@identity", .{});
     const second = view.root.?.children.last.?;
     try testing.expectEqual(first, second);
     view.finish();
 
-    try view.begin(window);
+    try view.begin(window, false);
     _ = try view.blockFromString("No identity@@@", .{});
     try testing.expectEqual(null, view.root.?.children.last.?.key);
     view.finish();
 
-    try view.begin(window);
+    try view.begin(window, false);
     _ = try view.blockFromString("No marker", .{});
     try testing.expectEqual(null, view.root.?.children.last.?.key);
     view.finish();
@@ -704,7 +720,7 @@ test "Fixed Layout" {
     try view.init(testing.allocator);
     defer view.deinit();
 
-    try view.begin(window);
+    try view.begin(window, false);
     try view.pushAttr(.{ .flags = .allowOverflow });
 
     try view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
@@ -732,7 +748,7 @@ test "Percent Layout" {
     try view.init(testing.allocator);
     defer view.deinit();
 
-    try view.begin(window);
+    try view.begin(window, false);
     try view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
     const parent = try view.buildBlock(.{}, null);
     try view.pushAttr(.{ .parent = parent });
@@ -746,7 +762,7 @@ test "Percent Layout" {
     try view.nextAttrs(&.{
         .{ .width = .grow },
         .{ .height = .grow },
-        .{ .width_shrink = 0.0 },
+        .{ .width_shrink = 1.0 },
     });
     const middle = try view.buildBlock(.{}, null);
 
@@ -773,7 +789,7 @@ test "Grow Layout" {
     try view.init(testing.allocator);
     defer view.deinit();
 
-    try view.begin(window);
+    try view.begin(window, false);
     try view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 300 } } });
     const parent = try view.buildBlock(.{}, null);
     try view.pushAttr(.{ .parent = parent });
@@ -793,7 +809,7 @@ test "fit sizing resolves from descendants" {
     try view.init(testing.allocator);
     defer view.deinit();
 
-    try view.begin(window);
+    try view.begin(window, false);
     try view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit }, .{ .axis = .y } });
     const parent = try view.buildBlock(.{}, null);
     try view.pushAttr(.{ .parent = parent });

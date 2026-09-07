@@ -37,8 +37,8 @@ pub const ChunkPool = struct {
     len: usize,
     alignment: mem.Alignment,
     chunk_size: u32,
-    reserved: u32 = 0,
-    free_list: Index = .none,
+    reserved: u32,
+    free_list: Index,
     mutex: Io.Mutex,
 
     pub fn init(self: *ChunkPool, allocator: Allocator, opt: Options) !void {
@@ -51,6 +51,8 @@ pub const ChunkPool = struct {
         const ptr = allocator.rawAlloc(len, alignment, @returnAddress()) orelse return error.OutOfMemory;
 
         self.* = .{
+            .reserved = 0,
+            .free_list = .none,
             .len = len,
             .ptr = ptr,
             .alignment = alignment,
@@ -112,6 +114,18 @@ pub const ChunkPool = struct {
 
     pub fn deinit(self: *ChunkPool, gpa: Allocator) void {
         gpa.rawFree(self.ptr[0..self.len], self.alignment, @returnAddress());
+    }
+
+    pub fn reset(self: *ChunkPool) void {
+        self.reserved = 0;
+        self.free_list = .none;
+    }
+
+    pub fn threadSafeReset(self: *ChunkPool, io: Io) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+
+        self.reset();
     }
 };
 
@@ -240,6 +254,10 @@ pub const ChunkAllocator = struct {
         const self: *ChunkAllocator = @ptrCast(@alignCast(ctx));
         const pool = self.findPool(memory.len, alignment) orelse unreachable;
         pool.threadSafeFree(memory.ptr[0..pool.chunk_size], self.io);
+    }
+
+    fn reset(self: *ChunkAllocator) void {
+        for (self.pools) |pool| pool.reset();
     }
 };
 
