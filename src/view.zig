@@ -66,14 +66,18 @@ pub fn deinit(self: *View) void {
     self.arena.deinit();
 }
 
-pub fn begin(self: *View, window: Window) !void {
+pub fn begin(self: *View, window: Window, resize: bool) !void {
     self.reset();
     errdefer self.reset();
 
     const size = try window.size();
     const mouse = try window.mouse();
 
-    self.mouse = .{ mouse.x, mouse.y };
+    if (resize) {
+        self.mouse = .{ -1.0, -1.0 };
+    } else {
+        self.mouse = .{ mouse.x, mouse.y };
+    }
 
     try self.nextAttrs(&.{
         .{ .width = .{ .fixed = size.w } },
@@ -125,7 +129,8 @@ pub fn signalForBlock(self: *View, block: *Block) Signal {
         signal.mouseover = true;
     }
 
-    if (flags.mouse and rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
+    if (flags.mouse and
+        rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
         rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
     {
         signal.hovered = true;

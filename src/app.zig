@@ -178,11 +178,11 @@ pub fn openWindow(self: *App, opts: win.Options) !void {
     self.states.append(window_state);
 }
 
-pub fn renderFrame(app: *App, window_state: *WindowState, sync: bool) !void {
+pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
     {
         const view = &window_state.view;
 
-        try view.begin(window_state.win);
+        try view.begin(window_state.win, resize);
         defer view.finish();
 
         try view.pushAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
@@ -242,5 +242,5 @@ pub fn renderFrame(app: *App, window_state: *WindowState, sync: bool) !void {
         });
     }
 
-    render.renderFrame(&app.renderer, &window_state.handle, frame, sync);
+    render.renderFrame(&app.renderer, &window_state.handle, frame, resize);
 }
