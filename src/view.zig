@@ -157,7 +157,7 @@ pub fn fmt(self: *View, comptime format: []const u8, args: anytype) ![]u8 {
     return std.fmt.bufPrint(buffer, format, args) catch unreachable;
 }
 
-pub fn blockFromString(self: *View, string: []const u8, flags: Block.Flags) *Block {
+pub fn buildBlockWithString(self: *View, string: []const u8, flags: Block.Flags) *Block {
     const chunk = if (std.mem.find(u8, string, "@@@")) |index|
         string[index + "@@@".len ..]
     else
@@ -687,24 +687,24 @@ test "Hash Block" {
     defer view.deinit();
 
     try view.begin(window, false);
-    _ = view.blockFromString("First label@@@identity", .{});
+    _ = view.buildBlockWithString("First label@@@identity", .{});
     const first = view.root.?.children.last.?;
     try testing.expectEqual(Wyhash.hash(0, "identity"), first.key.?);
     view.finish();
 
     try view.begin(window, false);
-    _ = view.blockFromString("Different label@@@identity", .{});
+    _ = view.buildBlockWithString("Different label@@@identity", .{});
     const second = view.root.?.children.last.?;
     try testing.expectEqual(first, second);
     view.finish();
 
     try view.begin(window, false);
-    _ = view.blockFromString("No identity@@@", .{});
+    _ = view.buildBlockWithString("No identity@@@", .{});
     try testing.expectEqual(null, view.root.?.children.last.?.key);
     view.finish();
 
     try view.begin(window, false);
-    _ = view.blockFromString("No marker", .{});
+    _ = view.buildBlockWithString("No marker", .{});
     try testing.expectEqual(null, view.root.?.children.last.?.key);
     view.finish();
 }
