@@ -93,7 +93,7 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
         .{ .height = .{ .fixed = size.h } },
     });
 
-    self.root = self.buildBlock(.{}, null);
+    self.root = self.buildBlock(.{});
 
     self.pushAttr(.{ .parent = self.root.? });
 }
@@ -172,7 +172,7 @@ pub fn buildBlockFromStr(self: *View, string: []const u8, flags: Block.Flags) *B
         break :key Wyhash.hash(0, chunk);
     };
 
-    return self.buildBlock(flags, key);
+    return self.buildBlock(.{ .flags = flags, .key = key });
 }
 
 pub fn getBlock(self: *View, key: u64) ?*Block {
@@ -197,12 +197,16 @@ pub fn cacheBlock(self: *View, block: *Block, key: u64) void {
     list.append(&block.cache);
 }
 
-pub fn buildBlock(self: *View, flags: Block.Flags, cache_key: ?u64) *Block {
+const Options = struct {
+    flags: Block.Flags = .{},
+    key: ?u64 = null,
+};
+pub fn buildBlock(self: *View, options: Options) *Block {
     const frame_chunks = self.frameChunks();
     const chunks = self.chunks.allocator();
 
     const block = bkl: {
-        if (cache_key) |key| {
+        if (options.key) |key| {
             if (self.getBlock(key)) |cached| {
                 if (cached.touched_frame == self.frame) {
                     log.warn("Repeated block key", .{});
@@ -232,7 +236,7 @@ pub fn buildBlock(self: *View, flags: Block.Flags, cache_key: ?u64) *Block {
         }
     };
 
-    block.build(self, flags);
+    block.build(self, options.flags);
 
     return block;
 }
@@ -321,7 +325,7 @@ pub fn spacer(self: *View, sizing: Sizing) *Block {
         .y => self.nextAttr(.{ .height = sizing }),
     }
 
-    return self.buildBlock(.{}, null);
+    return self.buildBlock(.{});
 }
 
 const Stacks = TaggedLinkedList(union(enum) {
@@ -643,11 +647,11 @@ test "Basic Operations" {
 
     try view.begin(window, false);
     view.nextAttr(.{ .width = .{ .fixed = 10 } });
-    _ = view.buildBlock(.{}, null);
+    _ = view.buildBlock(.{});
     view.nextAttr(.{ .width = .{ .fixed = 40 } });
-    const first = view.buildBlock(.{}, key);
+    const first = view.buildBlock(.{ .key = key });
     view.pushAttr(.{ .parent = first });
-    _ = view.buildBlock(.{}, null);
+    _ = view.buildBlock(.{});
     view.popAttr(.parent);
     view.finish();
 
@@ -661,7 +665,7 @@ test "Basic Operations" {
         .{ .axis = .y },
         .{ .width = .{ .fixed = 50 } },
     });
-    const second = view.buildBlock(.{}, key);
+    const second = view.buildBlock(.{ .key = key });
 
     try testing.expectEqual(first, second);
     try testing.expectEqual([2]f32{ 40, 0 }, second.size);
@@ -719,14 +723,14 @@ test "Fixed Layout" {
     view.pushAttr(.{ .flags = .allowOverflow });
 
     view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
-    const wrapper = view.buildBlock(.{}, null);
+    const wrapper = view.buildBlock(.{});
     view.pushAttr(.{ .parent = wrapper });
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 800 } }, .{ .height = .{ .fixed = 900 } } });
-    const first = view.buildBlock(.{}, null);
+    const first = view.buildBlock(.{});
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 120 } }, .{ .height = .{ .fixed = 120 } } });
-    const second = view.buildBlock(.{}, null);
+    const second = view.buildBlock(.{});
 
     view.popAttr(.parent);
     view.popAttr(.flags);
@@ -746,27 +750,27 @@ test "Percent Layout" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
-    const parent = view.buildBlock(.{}, null);
+    const parent = view.buildBlock(.{});
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{
         .{ .width = .{ .fixed = 100 } },
         .{ .height = .grow },
     });
-    const first = view.buildBlock(.{}, null);
+    const first = view.buildBlock(.{});
 
     view.nextAttrs(&.{
         .{ .width = .grow },
         .{ .height = .grow },
         .{ .width_shrink = 1.0 },
     });
-    const middle = view.buildBlock(.{}, null);
+    const middle = view.buildBlock(.{});
 
     view.nextAttrs(&.{
         .{ .width = .{ .fixed = 100 } },
         .{ .height = .grow },
     });
-    const last = view.buildBlock(.{}, null);
+    const last = view.buildBlock(.{});
 
     view.popAttr(.parent);
     view.finish();
@@ -787,11 +791,11 @@ test "Grow Layout" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 300 } } });
-    const parent = view.buildBlock(.{}, null);
+    const parent = view.buildBlock(.{});
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{ .{ .width = .{ .percent = 0.5 } }, .{ .height = .grow } });
-    const child = view.buildBlock(.{}, null);
+    const child = view.buildBlock(.{});
     view.popAttr(.parent);
     view.finish();
 
@@ -807,21 +811,21 @@ test "fit sizing resolves from descendants" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit }, .{ .axis = .y } });
-    const parent = view.buildBlock(.{}, null);
+    const parent = view.buildBlock(.{});
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit } });
-    const first = view.buildBlock(.{}, null);
+    const first = view.buildBlock(.{});
     view.pushAttr(.{ .parent = first });
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
-    _ = view.buildBlock(.{}, null);
+    _ = view.buildBlock(.{});
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
-    _ = view.buildBlock(.{}, null);
+    _ = view.buildBlock(.{});
     view.popAttr(.parent);
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 450 } } });
-    const second = view.buildBlock(.{}, null);
+    const second = view.buildBlock(.{});
     view.popAttr(.parent);
     view.finish();
 

@@ -190,7 +190,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
         view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
-        const red = view.buildBlock(.{}, null);
+        const red = view.buildBlock(.{});
         red.color = .{ 1.0, 0.0, 0.0, 1.0 };
 
         view.shrink(1.0);
@@ -235,7 +235,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
         view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
-        const blue = view.buildBlock(.{}, null);
+        const blue = view.buildBlock(.{});
         blue.color = .{ 0.0, 0.0, 1.0, 1.0 };
     }
 
