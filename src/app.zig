@@ -198,7 +198,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         const green = try view.blockFromFmt("green@@@{}", .{1}, .{ .mouse = true });
         const signal = view.signalForBlock(green);
 
-        if (signal.flags.hovered) {
+        if (signal.hovered) {
             green.color = .{ 0.0, 1.0, 0.5, 1.0 };
         } else {
             green.color = .{ 0.0, 1.0, 0.0, 1.0 };

@@ -129,7 +129,7 @@ pub fn finish(self: *View) void {
 pub fn signalForBlock(self: *View, block: *Block) Signal {
     const flags = block.flags;
 
-    var signal: Signal = .{ .flags = .none, .block = block };
+    var signal: Signal = .none;
 
     const mouse = self.mouse;
     const rect = block.rect;
@@ -137,14 +137,14 @@ pub fn signalForBlock(self: *View, block: *Block) Signal {
     if (rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
         rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
     {
-        signal.flags.mouseover = true;
+        signal.mouseover = true;
     }
 
     if (flags.mouse and
         rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
         rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
     {
-        signal.flags.hovered = true;
+        signal.hovered = true;
     }
 
     return signal;
@@ -367,17 +367,14 @@ pub const Sizing = union(enum) {
     percent: f32,
 };
 
-pub const Signal = struct {
-    block: *Block,
-    flags: packed struct {
-        const none: @This() = .{
-            .hovered = false,
-            .mouseover = false,
-        };
+pub const Signal = packed struct {
+    const none: @This() = .{
+        .hovered = false,
+        .mouseover = false,
+    };
 
-        hovered: bool,
-        mouseover: bool,
-    },
+    hovered: bool,
+    mouseover: bool,
 };
 
 pub const Block = struct {
