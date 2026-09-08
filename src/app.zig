@@ -195,7 +195,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
         view.shrink(1.0);
 
-        const green = view.buildBlockFromStr(try view.fmt("green@@@{}", .{1}), .{ .mouse = true });
+        const green = view.buildBlockFromStr("@@@green", .{ .mouse = true });
         const signal = view.signalForBlock(green);
 
         if (signal.hovered) {
