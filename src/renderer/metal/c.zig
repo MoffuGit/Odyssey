@@ -1,4 +1,5 @@
 //! LICENSE: [GHOSTTY]
+//!
 //! This file contains the definitions of the Metal API that we use.
 //!
 //! Because the online Apple developer docs have recently (as of January 2025)

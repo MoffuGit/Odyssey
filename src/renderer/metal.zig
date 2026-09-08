@@ -1,3 +1,5 @@
+//! LICENSE: [GHOSTTY]
+
 const std = @import("std");
 const Io = std.Io;
 const assert = std.debug.assert;
@@ -560,7 +562,7 @@ pub const Pipeline = struct {
             attachment.setProperty("pixelFormat", @intFromEnum(at.pixel_format));
 
             attachment.setProperty("blendingEnabled", at.blending_enabled);
-            // We always use premultiplied alpha blending for now.
+
             if (at.blending_enabled) {
                 attachment.setProperty("rgbBlendOperation", @intFromEnum(c.MTLBlendOperation.add));
                 attachment.setProperty("alphaBlendOperation", @intFromEnum(c.MTLBlendOperation.add));
