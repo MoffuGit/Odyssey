@@ -126,10 +126,10 @@ pub fn finish(self: *View) void {
     _ = self.frame_chunks[frame_index].reset();
 }
 
-pub fn signalForBlock(self: *View, blk: *Block) Signal {
+pub fn signal(self: *View, blk: *Block) Signal {
     const flags = blk.flags;
 
-    var signal: Signal = .none;
+    var _signal: Signal = .none;
 
     const mouse = self.mouse;
     const rect = blk.rect;
@@ -137,17 +137,17 @@ pub fn signalForBlock(self: *View, blk: *Block) Signal {
     if (rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
         rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
     {
-        signal.mouseover = true;
+        _signal.mouseover = true;
     }
 
     if (flags.mouse and
         rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
         rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
     {
-        signal.hovered = true;
+        _signal.hovered = true;
     }
 
-    return signal;
+    return _signal;
 }
 
 pub fn fmt(self: *View, comptime format: []const u8, args: anytype) ![]u8 {

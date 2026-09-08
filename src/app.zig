@@ -196,7 +196,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         view.shrink(1.0);
 
         const green = view.blockStr("@@@green", .{ .mouse = true });
-        const signal = view.signalForBlock(green);
+        const signal = view.signal(green);
 
         if (signal.hovered) {
             green.color = .{ 0.0, 1.0, 0.5, 1.0 };
