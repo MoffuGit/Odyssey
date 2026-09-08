@@ -151,9 +151,11 @@ pub fn signal(self: *View, blk: *Block) Signal {
 }
 
 pub fn fmt(self: *View, comptime format: []const u8, args: anytype) ![]u8 {
-    const required = std.fmt.count(format, args);
     const frame_arena = self.frameArena();
+
+    const required = std.fmt.count(format, args);
     const buffer = try frame_arena.alloc(u8, required);
+
     return std.fmt.bufPrint(buffer, format, args) catch unreachable;
 }
 
