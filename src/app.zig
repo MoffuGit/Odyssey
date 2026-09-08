@@ -190,12 +190,12 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
         view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
-        const red = view.buildBlock(.{});
+        const red = view.block(.{});
         red.color = .{ 1.0, 0.0, 0.0, 1.0 };
 
         view.shrink(1.0);
 
-        const green = view.buildBlockFromStr("@@@green", .{ .mouse = true });
+        const green = view.blockStr("@@@green", .{ .mouse = true });
         const signal = view.signalForBlock(green);
 
         if (signal.hovered) {
@@ -235,7 +235,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
         view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
-        const blue = view.buildBlock(.{});
+        const blue = view.block(.{});
         blue.color = .{ 0.0, 0.0, 1.0, 1.0 };
     }
 

@@ -93,7 +93,7 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
         .{ .height = .{ .fixed = size.h } },
     });
 
-    self.root = self.buildBlock(.{});
+    self.root = self.block(.{});
 
     self.pushAttr(.{ .parent = self.root.? });
 }
@@ -126,13 +126,13 @@ pub fn finish(self: *View) void {
     _ = self.frame_chunks[frame_index].reset();
 }
 
-pub fn signalForBlock(self: *View, block: *Block) Signal {
-    const flags = block.flags;
+pub fn signalForBlock(self: *View, blk: *Block) Signal {
+    const flags = blk.flags;
 
     var signal: Signal = .none;
 
     const mouse = self.mouse;
-    const rect = block.rect;
+    const rect = blk.rect;
 
     if (rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
         rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
@@ -157,7 +157,7 @@ pub fn fmt(self: *View, comptime format: []const u8, args: anytype) ![]u8 {
     return std.fmt.bufPrint(buffer, format, args) catch unreachable;
 }
 
-pub fn buildBlockFromStr(self: *View, string: []const u8, flags: Block.Flags) *Block {
+pub fn blockStr(self: *View, string: []const u8, flags: Block.Flags) *Block {
     const chunk = if (std.mem.find(u8, string, "@@@")) |index|
         string[index + "@@@".len ..]
     else
@@ -172,7 +172,7 @@ pub fn buildBlockFromStr(self: *View, string: []const u8, flags: Block.Flags) *B
         break :key Wyhash.hash(0, chunk);
     };
 
-    return self.buildBlock(.{ .flags = flags, .key = key });
+    return self.block(.{ .flags = flags, .key = key });
 }
 
 pub fn getBlock(self: *View, key: u64) ?*Block {
@@ -180,65 +180,65 @@ pub fn getBlock(self: *View, key: u64) ?*Block {
     var entry = list.first;
 
     while (entry) |cache| : (entry = cache.next) {
-        const block: *Block = @fieldParentPtr("cache", cache);
-        if (block.key == key) {
-            return block;
+        const blk: *Block = @fieldParentPtr("cache", cache);
+        if (blk.key == key) {
+            return blk;
         }
     }
 
     return null;
 }
 
-pub fn cacheBlock(self: *View, block: *Block, key: u64) void {
+pub fn cacheBlock(self: *View, blk: *Block, key: u64) void {
     const list = &self.cache[key % self.cache.len];
 
-    block.key = key;
+    blk.key = key;
 
-    list.append(&block.cache);
+    list.append(&blk.cache);
 }
 
 const Options = struct {
     flags: Block.Flags = .{},
     key: ?u64 = null,
 };
-pub fn buildBlock(self: *View, options: Options) *Block {
+pub fn block(self: *View, options: Options) *Block {
     const frame_chunks = self.frameChunks();
     const chunks = self.chunks.allocator();
 
-    const block = bkl: {
+    const blk = bkl: {
         if (options.key) |key| {
             if (self.getBlock(key)) |cached| {
                 if (cached.touched_frame == self.frame) {
                     log.warn("Repeated block key", .{});
 
-                    const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
-                    block.* = .empty;
+                    const blk = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
+                    blk.* = .empty;
 
-                    break :bkl block;
+                    break :bkl blk;
                 }
 
                 cached.reset();
 
                 break :bkl cached;
             } else {
-                const block = chunks.create(Block) catch @panic("Block Chunk Overflow");
-                block.* = .empty;
+                const blk = chunks.create(Block) catch @panic("Block Chunk Overflow");
+                blk.* = .empty;
 
-                self.cacheBlock(block, key);
+                self.cacheBlock(blk, key);
 
-                break :bkl block;
+                break :bkl blk;
             }
         } else {
-            const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
-            block.* = .empty;
+            const blk = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
+            blk.* = .empty;
 
-            break :bkl block;
+            break :bkl blk;
         }
     };
 
-    block.build(self, options.flags);
+    blk.build(self, options.flags);
 
-    return block;
+    return blk;
 }
 
 pub fn pushAttr(self: *View, attr: Attribute) void {
@@ -325,7 +325,7 @@ pub fn spacer(self: *View, sizing: Sizing) *Block {
         .y => self.nextAttr(.{ .height = sizing }),
     }
 
-    return self.buildBlock(.{});
+    return self.block(.{});
 }
 
 const Stacks = TaggedLinkedList(union(enum) {
@@ -475,9 +475,9 @@ pub const Block = struct {
     }
 
     pub fn firstPostOrder(self: *Block) *Block {
-        var block = self;
-        while (block.children.first) |child| block = child;
-        return block;
+        var blk = self;
+        while (blk.children.first) |child| blk = child;
+        return blk;
     }
 
     pub fn nextPostOrder(self: *Block) ?*Block {
@@ -494,8 +494,8 @@ pub const Block = struct {
     }
 
     pub fn resolveFixedSizing(self: *Block, axis: u1) void {
-        var block: ?*Block = self;
-        while (block) |current| : (block = current.nextPreOrder()) {
+        var blk: ?*Block = self;
+        while (blk) |current| : (blk = current.nextPreOrder()) {
             switch (current.sizing[axis]) {
                 .fixed => |fixed| current.size[axis] = fixed,
                 else => {},
@@ -504,8 +504,8 @@ pub const Block = struct {
     }
 
     pub fn resolvePerSizing(self: *Block, axis: u1) void {
-        var block: ?*Block = self;
-        while (block) |current| : (block = current.nextPreOrder()) {
+        var blk: ?*Block = self;
+        while (blk) |current| : (blk = current.nextPreOrder()) {
             switch (current.sizing[axis]) {
                 .percent => |percent| {
                     const parent_size = parent_size: {
@@ -528,8 +528,8 @@ pub const Block = struct {
     }
 
     pub fn resolveFitSizing(self: *Block, axis: u1) void {
-        var block: ?*Block = self.firstPostOrder();
-        while (block) |current| : (block = current.nextPostOrder()) {
+        var blk: ?*Block = self.firstPostOrder();
+        while (blk) |current| : (blk = current.nextPostOrder()) {
             switch (current.sizing[axis]) {
                 .fit => {
                     var total: f32 = 0.0;
@@ -550,8 +550,8 @@ pub const Block = struct {
     }
 
     pub fn resolveOverflow(self: *Block, axis: u1) void {
-        var block: ?*Block = self;
-        while (block) |current| : (block = current.nextPreOrder()) {
+        var blk: ?*Block = self;
+        while (blk) |current| : (blk = current.nextPreOrder()) {
             const allowed = current.size[axis];
             const overflow_mask = @as(u2, 1) << axis;
 
@@ -607,8 +607,8 @@ pub const Block = struct {
     }
 
     pub fn resolveRect(self: *Block, axis: u1) void {
-        var block: ?*Block = self;
-        while (block) |current| : (block = current.nextPreOrder()) {
+        var blk: ?*Block = self;
+        while (blk) |current| : (blk = current.nextPreOrder()) {
             var position: f32 = 0.0;
             var bounds: f32 = 0.0;
 
@@ -647,11 +647,11 @@ test "Basic Operations" {
 
     try view.begin(window, false);
     view.nextAttr(.{ .width = .{ .fixed = 10 } });
-    _ = view.buildBlock(.{});
+    _ = view.block(.{});
     view.nextAttr(.{ .width = .{ .fixed = 40 } });
-    const first = view.buildBlock(.{ .key = key });
+    const first = view.block(.{ .key = key });
     view.pushAttr(.{ .parent = first });
-    _ = view.buildBlock(.{});
+    _ = view.block(.{});
     view.popAttr(.parent);
     view.finish();
 
@@ -665,7 +665,7 @@ test "Basic Operations" {
         .{ .axis = .y },
         .{ .width = .{ .fixed = 50 } },
     });
-    const second = view.buildBlock(.{ .key = key });
+    const second = view.block(.{ .key = key });
 
     try testing.expectEqual(first, second);
     try testing.expectEqual([2]f32{ 40, 0 }, second.size);
@@ -691,24 +691,24 @@ test "Hash Block" {
     defer view.deinit();
 
     try view.begin(window, false);
-    _ = view.buildBlockFromStr("First label@@@identity", .{});
+    _ = view.blockStr("First label@@@identity", .{});
     const first = view.root.?.children.last.?;
     try testing.expectEqual(Wyhash.hash(0, "identity"), first.key.?);
     view.finish();
 
     try view.begin(window, false);
-    _ = view.buildBlockFromStr("Different label@@@identity", .{});
+    _ = view.blockStr("Different label@@@identity", .{});
     const second = view.root.?.children.last.?;
     try testing.expectEqual(first, second);
     view.finish();
 
     try view.begin(window, false);
-    _ = view.buildBlockFromStr("No identity@@@", .{});
+    _ = view.blockStr("No identity@@@", .{});
     try testing.expectEqual(null, view.root.?.children.last.?.key);
     view.finish();
 
     try view.begin(window, false);
-    _ = view.buildBlockFromStr("No marker", .{});
+    _ = view.blockStr("No marker", .{});
     try testing.expectEqual(null, view.root.?.children.last.?.key);
     view.finish();
 }
@@ -723,14 +723,14 @@ test "Fixed Layout" {
     view.pushAttr(.{ .flags = .allowOverflow });
 
     view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
-    const wrapper = view.buildBlock(.{});
+    const wrapper = view.block(.{});
     view.pushAttr(.{ .parent = wrapper });
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 800 } }, .{ .height = .{ .fixed = 900 } } });
-    const first = view.buildBlock(.{});
+    const first = view.block(.{});
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 120 } }, .{ .height = .{ .fixed = 120 } } });
-    const second = view.buildBlock(.{});
+    const second = view.block(.{});
 
     view.popAttr(.parent);
     view.popAttr(.flags);
@@ -750,27 +750,27 @@ test "Percent Layout" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
-    const parent = view.buildBlock(.{});
+    const parent = view.block(.{});
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{
         .{ .width = .{ .fixed = 100 } },
         .{ .height = .grow },
     });
-    const first = view.buildBlock(.{});
+    const first = view.block(.{});
 
     view.nextAttrs(&.{
         .{ .width = .grow },
         .{ .height = .grow },
         .{ .width_shrink = 1.0 },
     });
-    const middle = view.buildBlock(.{});
+    const middle = view.block(.{});
 
     view.nextAttrs(&.{
         .{ .width = .{ .fixed = 100 } },
         .{ .height = .grow },
     });
-    const last = view.buildBlock(.{});
+    const last = view.block(.{});
 
     view.popAttr(.parent);
     view.finish();
@@ -791,11 +791,11 @@ test "Grow Layout" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 300 } } });
-    const parent = view.buildBlock(.{});
+    const parent = view.block(.{});
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{ .{ .width = .{ .percent = 0.5 } }, .{ .height = .grow } });
-    const child = view.buildBlock(.{});
+    const child = view.block(.{});
     view.popAttr(.parent);
     view.finish();
 
@@ -811,21 +811,21 @@ test "fit sizing resolves from descendants" {
 
     try view.begin(window, false);
     view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit }, .{ .axis = .y } });
-    const parent = view.buildBlock(.{});
+    const parent = view.block(.{});
     view.pushAttr(.{ .parent = parent });
 
     view.nextAttrs(&.{ .{ .width = .fit }, .{ .height = .fit } });
-    const first = view.buildBlock(.{});
+    const first = view.block(.{});
     view.pushAttr(.{ .parent = first });
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
-    _ = view.buildBlock(.{});
+    _ = view.block(.{});
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 100 } }, .{ .height = .{ .fixed = 150 } } });
-    _ = view.buildBlock(.{});
+    _ = view.block(.{});
     view.popAttr(.parent);
 
     view.nextAttrs(&.{ .{ .width = .{ .fixed = 400 } }, .{ .height = .{ .fixed = 450 } } });
-    const second = view.buildBlock(.{});
+    const second = view.block(.{});
     view.popAttr(.parent);
     view.finish();
 
