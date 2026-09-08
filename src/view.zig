@@ -205,7 +205,7 @@ pub fn buildBlock(self: *View, flags: Block.Flags, cache_key: ?u64) *Block {
         if (cache_key) |key| {
             if (self.getBlock(key)) |cached| {
                 if (cached.touched_frame == self.frame) {
-                    log.warn("Repeated block key: {}", .{});
+                    log.warn("Repeated block key", .{});
 
                     const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
                     block.* = .empty;
