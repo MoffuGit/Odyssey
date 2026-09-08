@@ -186,7 +186,6 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         defer view.finish();
 
         view.pushAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
-        defer view.popAttrs(&.{ .width, .height });
 
         view.nextAttr(.{ .width = .{ .fixed = 100 } });
 
