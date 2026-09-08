@@ -197,12 +197,12 @@ pub fn cacheBlock(self: *View, block: *Block, key: u64) void {
     list.append(&block.cache);
 }
 
-pub fn buildBlock(self: *View, flags: Block.Flags, optional_key: ?u64) *Block {
+pub fn buildBlock(self: *View, flags: Block.Flags, cache_key: ?u64) *Block {
     const frame_chunks = self.frameChunks();
     const chunks = self.chunks.allocator();
 
     const block = bkl: {
-        if (optional_key) |key| {
+        if (cache_key) |key| {
             if (self.getBlock(key)) |cached| {
                 if (cached.touched_frame == self.frame) {
                     const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
