@@ -220,10 +220,10 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 view.shrink(1.0);
                 _ = view.spacer(.grow);
 
-                view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
-                view.nextAttr(.{ .radius = @splat(12.0) });
+                view.rounded(12.0);
 
-                _ = view.spacer(.{ .fixed = 50 });
+                const orange = view.spacer(.{ .fixed = 50 });
+                orange.color = .{ 1.0, 0.647, 0.0, 1.0 };
 
                 view.shrink(1.0);
                 _ = view.spacer(.grow);

@@ -318,6 +318,10 @@ pub fn shrink(self: *View, per: f32) void {
     }
 }
 
+pub fn rounded(self: *View, radius: f32) void {
+    self.nextAttr(.{ .radius = @splat(radius) });
+}
+
 pub fn spacer(self: *View, sizing: Sizing) *Block {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
