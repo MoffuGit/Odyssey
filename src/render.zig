@@ -106,6 +106,7 @@ pub const Rect = extern struct {
     color_2: [4]f32 align(16),
     color_3: [4]f32 align(16),
     corner_rads: [4]f32 align(16),
+    border: f32 align(4),
 };
 
 pub const FrameState = struct {

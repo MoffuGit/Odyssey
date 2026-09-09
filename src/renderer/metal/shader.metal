@@ -3,20 +3,22 @@
 using namespace metal;
 
 struct RectInput {
-    float4 position     [[attribute(0)]];
-    float4 color_0      [[attribute(1)]];
-    float4 color_1      [[attribute(2)]];
-    float4 color_2      [[attribute(3)]];
-    float4 color_3      [[attribute(4)]];
-    float4 corner_rads   [[attribute(5)]];
+    float4  position    [[attribute(0)]];
+    float4  color_0     [[attribute(1)]];
+    float4  color_1     [[attribute(2)]];
+    float4  color_2     [[attribute(3)]];
+    float4  color_3     [[attribute(4)]];
+    float4  corner_rads [[attribute(5)]];
+    float   border      [[attribute(6)]];
 };
 
 struct RectOutput {
-    float4 position [[position]];
-    float4 color;
-    float2 sdf_pos;
-    float2 half_size [[flat]];
-    float  radius [[flat]];
+    float4  position    [[position]];
+    float4  color;
+    float2  sdf_pos;
+    float2  half_size   [[flat]];
+    float   radius      [[flat]];
+    float   border      [[flat]];
 };
 
 struct Uniforms {
@@ -48,6 +50,7 @@ vertex RectOutput rectVertexShader(
         0.0f,
         1.0f
     );
+    out.border = in.border;
     out.radius = in.corner_rads[v_id];
     out.color = colors[v_id];
     out.half_size = half_size;
@@ -56,6 +59,16 @@ vertex RectOutput rectVertexShader(
 }
 
 fragment float4 rectFragmentShader(RectOutput in [[stage_in]]) {
+    float border_sdf_t = 1.0f;
+    if(in.border > 0.0f) {
+        float border_sdf_s = rect_sdf(in.sdf_pos, in.half_size - float2(2.0f, 2.0f) - in.border, max(in.radius - in.border, 0.0f));
+        border_sdf_t = smoothstep(0, 2.0f, in.border);
+    }
+
+    if(border_sdf_t < 0.001f) {
+        discard_fragment();
+    }
+
     float corner_sdf_t = 1.0f;
 
     if(in.radius > 0.0f) {
@@ -64,6 +77,7 @@ fragment float4 rectFragmentShader(RectOutput in [[stage_in]]) {
     }
 
     float4 color = in.color;
+    color.a *= border_sdf_t;
     color.a *=  corner_sdf_t;
     color.rgb *= color.a;
 

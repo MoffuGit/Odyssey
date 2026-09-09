@@ -321,8 +321,12 @@ pub fn height(self: *View, sizing: Sizing) void {
 }
 
 pub fn background(self: *View, color: [4]f32) void {
-    self.nextAttr(.{ .flags = .{ .background = true } });
-    self.nextAttr(.{ .color = color });
+    self.nextAttr(.{ .background = color });
+}
+
+pub fn border(self: *View, thickness: f32, color: [4]f32) void {
+    self.nextAttr(.{ .border = color });
+    self.nextAttr(.{ .thickness = thickness });
 }
 
 pub fn col(self: *View) void {
@@ -333,7 +337,7 @@ pub fn row(self: *View) void {
     self.nextAttr(.{ .axis = .x });
 }
 
-pub fn spacer(self: *View, sizing: Sizing) void {
+pub fn spacer(self: *View, sizing: Sizing, flags: Block.Flags) void {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
@@ -342,19 +346,21 @@ pub fn spacer(self: *View, sizing: Sizing) void {
         .y => self.height(sizing),
     }
 
-    _ = self.block(.{});
+    _ = self.block(.{ .flags = flags });
 }
 
 const Stacks = TaggedLinkedList(union(enum) {
     parent: *Block,
     axis: Axis,
-    color: [4]f32,
+    background: [4]f32,
     width: Sizing,
     width_shrink: f32,
     height: Sizing,
     height_shrink: f32,
     flags: Block.Flags,
     radius: [4]f32,
+    border: [4]f32,
+    thickness: f32,
 });
 
 pub const Attribute = Stacks.Value;
@@ -411,6 +417,8 @@ pub const Block = struct {
     sizing: [2]Sizing,
     shrink: [2]f32,
     color: [4]f32,
+    border: [4]f32,
+    thickness: f32,
     flags: Flags,
     radius: [4]f32,
 
@@ -425,6 +433,7 @@ pub const Block = struct {
         overflow: u2 = 0,
         mouse: bool = false,
         background: bool = false,
+        border: bool = false,
     };
 
     pub const empty: Block = .{
@@ -446,6 +455,8 @@ pub const Block = struct {
         .bounds = @splat(0.0),
         .key = null,
         .radius = @splat(0.0),
+        .border = @splat(0.0),
+        .thickness = 0.0,
     };
 
     fn build(self: *Block, view: *View, flags: Flags) void {
@@ -462,11 +473,16 @@ pub const Block = struct {
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
         if (view.stacks.get(.height_shrink).head) |node| self.shrink[1] = clamp(node.value, 0.0, 1.0);
 
-        const stack_flags: u4 = if (view.stacks.get(.flags).head) |node| @bitCast(node.value) else 0;
-        self.flags = @bitCast(@as(u4, @bitCast(flags)) | stack_flags);
+        const stack_flags: u5 = if (view.stacks.get(.flags).head) |node| @bitCast(node.value) else 0;
+        self.flags = @bitCast(@as(u5, @bitCast(flags)) | stack_flags);
 
         if (self.flags.background) {
-            if (view.stacks.get(.color).head) |node| self.color = node.value;
+            if (view.stacks.get(.background).head) |node| self.color = node.value;
+        }
+
+        if (self.flags.border) {
+            if (view.stacks.get(.border).head) |node| self.border = node.value;
+            if (view.stacks.get(.thickness).head) |node| self.thickness = node.value;
         }
 
         self.touched_frame = view.frame;
