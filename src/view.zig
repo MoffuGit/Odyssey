@@ -88,10 +88,8 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
         self.mouse = .{ mouse.x, mouse.y };
     }
 
-    self.nextAttrs(&.{
-        .{ .width = .{ .fixed = size.w } },
-        .{ .height = .{ .fixed = size.h } },
-    });
+    self.width(.{ .fixed = size.w });
+    self.height(.{ .fixed = size.h });
 
     self.root = self.block(.{});
 
@@ -262,21 +260,13 @@ pub fn popAttr(self: *View, comptime field: StackField) void {
     if (self.stacks.pop(field) == null) unreachable;
 }
 
-pub fn nextAttr(self: *View, attr: Attribute) void {
-    self.pushAttr(attr);
-    self.flagStack(meta.activeTag(attr));
-}
-
-pub fn pushAttrs(self: *View, attrs: []const Attribute) void {
-    for (attrs) |attr| self.pushAttr(attr);
-}
-
 pub fn popAttrs(self: *View, comptime fields: []const StackField) void {
     inline for (fields) |field| self.popAttr(field);
 }
 
-pub fn nextAttrs(self: *View, attrs: []const Attribute) void {
-    for (attrs) |attr| self.nextAttr(attr);
+pub fn nextAttr(self: *View, attr: Attribute) void {
+    self.pushAttr(attr);
+    self.flagStack(meta.activeTag(attr));
 }
 
 fn frameArena(self: *View) Allocator {
@@ -322,16 +312,37 @@ pub fn rounded(self: *View, radius: f32) void {
     self.nextAttr(.{ .radius = @splat(radius) });
 }
 
-pub fn spacer(self: *View, sizing: Sizing) *Block {
+pub fn width(self: *View, sizing: Sizing) void {
+    self.nextAttr(.{ .width = sizing });
+}
+
+pub fn height(self: *View, sizing: Sizing) void {
+    self.nextAttr(.{ .height = sizing });
+}
+
+pub fn background(self: *View, color: [4]f32) void {
+    self.nextAttr(.{ .flags = .{ .background = true } });
+    self.nextAttr(.{ .color = color });
+}
+
+pub fn col(self: *View) void {
+    self.nextAttr(.{ .axis = .y });
+}
+
+pub fn row(self: *View) void {
+    self.nextAttr(.{ .axis = .x });
+}
+
+pub fn spacer(self: *View, sizing: Sizing) void {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
     switch (axis) {
-        .x => self.nextAttr(.{ .width = sizing }),
-        .y => self.nextAttr(.{ .height = sizing }),
+        .x => self.width(sizing),
+        .y => self.height(sizing),
     }
 
-    return self.block(.{});
+    _ = self.block(.{});
 }
 
 const Stacks = TaggedLinkedList(union(enum) {
@@ -413,6 +424,7 @@ pub const Block = struct {
 
         overflow: u2 = 0,
         mouse: bool = false,
+        background: bool = false,
     };
 
     pub const empty: Block = .{
@@ -444,15 +456,18 @@ pub const Block = struct {
         }
 
         if (view.stacks.get(.axis).head) |node| self.axis = node.value;
-        if (view.stacks.get(.color).head) |node| self.color = node.value;
         if (view.stacks.get(.width).head) |node| self.sizing[0] = node.value;
         if (view.stacks.get(.height).head) |node| self.sizing[1] = node.value;
         if (view.stacks.get(.radius).head) |node| self.radius = node.value;
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
         if (view.stacks.get(.height_shrink).head) |node| self.shrink[1] = clamp(node.value, 0.0, 1.0);
 
-        const stack_flags: u3 = if (view.stacks.get(.flags).head) |node| @bitCast(node.value) else 0;
-        self.flags = @bitCast(@as(u3, @bitCast(flags)) | stack_flags);
+        const stack_flags: u4 = if (view.stacks.get(.flags).head) |node| @bitCast(node.value) else 0;
+        self.flags = @bitCast(@as(u4, @bitCast(flags)) | stack_flags);
+
+        if (self.flags.background) {
+            if (view.stacks.get(.color).head) |node| self.color = node.value;
+        }
 
         self.touched_frame = view.frame;
 

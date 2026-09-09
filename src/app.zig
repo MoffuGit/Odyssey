@@ -185,22 +185,20 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         try view.begin(window_state.win, resize);
         defer view.finish();
 
-        view.pushAttrs(&.{ .{ .width = .grow }, .{ .height = .grow } });
+        view.pushAttr(.{ .width = .grow });
+        view.pushAttr(.{ .height = .grow });
 
-        view.nextAttr(.{ .width = .{ .fixed = 100 } });
-
-        const red = view.block(.{});
-        red.color = .{ 1.0, 0.0, 0.0, 1.0 };
+        view.background(.{ 1.0, 0.0, 0.0, 1.0 });
+        view.spacer(.{ .fixed = 100 });
 
         view.shrink(1.0);
 
+        view.background(.{ 0.0, 1.0, 0.0, 1.0 });
         const green = view.blockStr("@@@green", .{ .mouse = true });
         const signal = view.signal(green);
 
         if (signal.hovered) {
             green.color = .{ 0.0, 1.0, 0.5, 1.0 };
-        } else {
-            green.color = .{ 0.0, 1.0, 0.0, 1.0 };
         }
 
         {
@@ -208,35 +206,34 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             defer view.popAttr(.parent);
 
             view.shrink(1.0);
-            _ = view.spacer(.grow);
+            view.spacer(.grow);
 
-            view.nextAttr(.{ .axis = .y });
+            view.col();
 
-            const col = view.spacer(.{ .fixed = 50 });
+            view.width(.{ .fixed = 100 });
+            const col = view.block(.{});
             {
                 view.pushAttr(.{ .parent = col });
                 defer view.popAttr(.parent);
 
                 view.shrink(1.0);
-                _ = view.spacer(.grow);
+                view.spacer(.grow);
 
                 view.rounded(12.0);
 
-                const orange = view.spacer(.{ .fixed = 50 });
-                orange.color = .{ 1.0, 0.647, 0.0, 1.0 };
+                view.background(.{ 1.0, 0.647, 0.0, 1.0 });
+                view.spacer(.{ .fixed = 100 });
 
                 view.shrink(1.0);
-                _ = view.spacer(.grow);
+                view.spacer(.grow);
             }
 
             view.shrink(1.0);
-            _ = view.spacer(.grow);
+            view.spacer(.grow);
         }
 
-        view.nextAttr(.{ .width = .{ .fixed = 100 } });
-
-        const blue = view.block(.{});
-        blue.color = .{ 0.0, 0.0, 1.0, 1.0 };
+        view.background(.{ 0.0, 0.0, 1.0, 1.0 });
+        view.spacer(.{ .fixed = 100 });
     }
 
     const frame = window_state.handle.nextFrame();
