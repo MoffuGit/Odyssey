@@ -203,11 +203,12 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             view.shrink(1.0);
             view.spacer(.grow);
 
-            view.col();
-
-            view.width(.{ .fixed = 100 });
-            const col = view.block(.{});
             {
+                view.col();
+                view.width(.{ .fixed = 100 });
+
+                const col = view.block(.{});
+
                 view.pushAttr(.{ .parent = col });
                 defer view.popAttr(.parent);
 
