@@ -221,6 +221,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 _ = view.spacer(.grow);
 
                 view.nextAttr(.{ .color = .{ 1.0, 0.0, 0.0, 1.0 } });
+                view.nextAttr(.{ .radius = @splat(12.0) });
 
                 _ = view.spacer(.{ .fixed = 50 });
 
@@ -245,14 +246,15 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
     try frame.uniform(.{ .viewport_size = .{ size.w, size.h } });
 
-    var box = window_state.view.root;
-    while (box) |current| : (box = current.nextPreOrder()) {
+    var node = window_state.view.root;
+    while (node) |box| : (node = box.nextPreOrder()) {
         try frame.rect(.{
-            .position = current.rect[0] ++ current.rect[1],
-            .color_0 = current.color,
-            .color_1 = current.color,
-            .color_2 = current.color,
-            .color_3 = current.color,
+            .position = box.rect[0] ++ box.rect[1],
+            .color_0 = box.color,
+            .color_1 = box.color,
+            .color_2 = box.color,
+            .color_3 = box.color,
+            .corner_rads = box.radius,
         });
     }
 

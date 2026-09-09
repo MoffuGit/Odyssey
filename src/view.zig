@@ -339,6 +339,7 @@ const Stacks = TaggedLinkedList(union(enum) {
     height: Sizing,
     height_shrink: f32,
     flags: Block.Flags,
+    radius: [4]f32,
 });
 
 pub const Attribute = Stacks.Value;
@@ -396,6 +397,7 @@ pub const Block = struct {
     shrink: [2]f32,
     color: [4]f32,
     flags: Flags,
+    radius: [4]f32,
 
     size: [2]f32,
     position: [2]f32,
@@ -427,6 +429,7 @@ pub const Block = struct {
         .position = @splat(0.0),
         .bounds = @splat(0.0),
         .key = null,
+        .radius = @splat(0.0),
     };
 
     fn build(self: *Block, view: *View, flags: Flags) void {
@@ -440,6 +443,7 @@ pub const Block = struct {
         if (view.stacks.get(.color).head) |node| self.color = node.value;
         if (view.stacks.get(.width).head) |node| self.sizing[0] = node.value;
         if (view.stacks.get(.height).head) |node| self.sizing[1] = node.value;
+        if (view.stacks.get(.radius).head) |node| self.radius = node.value;
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
         if (view.stacks.get(.height_shrink).head) |node| self.shrink[1] = clamp(node.value, 0.0, 1.0);
 
