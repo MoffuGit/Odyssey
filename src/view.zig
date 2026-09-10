@@ -337,7 +337,7 @@ pub fn row(self: *View) void {
     self.nextAttr(.{ .axis = .x });
 }
 
-pub fn spacer(self: *View, sizing: Sizing, flags: Block.Flags) void {
+pub fn spacer(self: *View, sizing: Sizing) void {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
@@ -346,7 +346,7 @@ pub fn spacer(self: *View, sizing: Sizing, flags: Block.Flags) void {
         .y => self.height(sizing),
     }
 
-    _ = self.block(.{ .flags = flags });
+    _ = self.block(.{});
 }
 
 const Stacks = TaggedLinkedList(union(enum) {

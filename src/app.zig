@@ -189,7 +189,9 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         view.pushAttr(.{ .height = .grow });
 
         view.background(.{ 1.0, 0.0, 0.0, 1.0 });
-        view.spacer(.{ .fixed = 100 }, .{ .background = true });
+        view.nextAttr(.{ .flags = .{ .background = true } });
+
+        view.spacer(.{ .fixed = 100 });
 
         const green = green: {
             view.shrink(1.0);
@@ -201,7 +203,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             defer view.popAttr(.parent);
 
             view.shrink(1.0);
-            view.spacer(.grow, .{});
+            view.spacer(.grow);
 
             {
                 view.col();
@@ -213,20 +215,22 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 defer view.popAttr(.parent);
 
                 view.shrink(1.0);
-                view.spacer(.grow, .{});
+                view.spacer(.grow);
+
+                view.nextAttr(.{ .flags = .{ .background = true, .border = true } });
 
                 view.rounded(12.0);
+                view.background(.{ 1.0, 0.647, 0.0, 1.0 });
                 view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
 
-                view.background(.{ 1.0, 0.647, 0.0, 1.0 });
-                view.spacer(.{ .fixed = 100 }, .{ .border = true, .background = true });
+                view.spacer(.{ .fixed = 100 });
 
                 view.shrink(1.0);
-                view.spacer(.grow, .{});
+                view.spacer(.grow);
             }
 
             view.shrink(1.0);
-            view.spacer(.grow, .{});
+            view.spacer(.grow);
 
             break :green green;
         };
@@ -235,8 +239,9 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             green.color = .{ 0.0, 1.0, 0.5, 1.0 };
         }
 
+        view.nextAttr(.{ .flags = .{ .background = true } });
         view.background(.{ 0.0, 0.0, 1.0, 1.0 });
-        view.spacer(.{ .fixed = 100 }, .{ .background = true });
+        view.spacer(.{ .fixed = 100 });
     }
 
     const frame = window_state.handle.nextFrame();
