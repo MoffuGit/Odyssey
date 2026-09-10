@@ -43,7 +43,7 @@ pub fn pollEvents() void {
     c.RGFW_pollEvents();
 }
 
-pub fn setEventCallback(flag: EventType, comptime function: *const fn (event: Event) void) void {
+pub fn setEventCallback(flag: EventKind, comptime function: *const fn (event: Event) void) void {
     const TypeErased = struct {
         fn callback(raw_event: [*c]const c.RGFW_event) callconv(.c) void {
             const event = Event.convert(raw_event.*);
@@ -170,7 +170,7 @@ pub const Window = window: {
     };
 };
 
-const EventType = enum(u8) {
+const EventKind = enum(u8) {
     none = c.RGFW_eventNone,
     key_pressed = c.RGFW_keyPressed,
     key_released = c.RGFW_keyReleased,
@@ -202,29 +202,31 @@ fn activeMod(mod: c.RGFW_keymod, flag: c.RGFW_keymod) bool {
     return mod & flag != 0;
 }
 
+pub const EventType = union(enum) {
+    none,
+    key: Key,
+    key_char: u32,
+    mouse_motion: MouseMotion,
+    mouse_button: MouseButton,
+    mouse_scroll: MouseScroll,
+    window_update: WindowUpdate,
+    focus_in,
+    focus_out,
+    //I don't handle this events yet
+    data_drop,
+    data_drag,
+    scale,
+    monitor,
+};
+
 pub const Event = struct {
     win: Window,
-    type: union(enum) {
-        none,
-        key: Key,
-        key_char: u32,
-        mouse_motion: MouseMotion,
-        mouse_button: MouseButton,
-        mouse_scroll: MouseScroll,
-        window_update: WindowUpdate,
-        focus_in,
-        focus_out,
-        //I don't handle this events yet
-        data_drop,
-        data_drag,
-        scale,
-        monitor,
-    },
+    type: EventType,
 
     pub fn convert(raw: c.RGFW_event) Event {
         return .{
             .win = .{ .raw = raw.common.win },
-            .type = switch (@as(EventType, @enumFromInt(raw.type))) {
+            .type = switch (@as(EventKind, @enumFromInt(raw.type))) {
                 .none => .none,
                 .window_focus_in => .focus_in,
                 .window_focus_out => .focus_out,
@@ -263,7 +265,7 @@ pub const Event = struct {
                 },
                 .mouse_button_released, .mouse_button_pressed => .{
                     .mouse_button = .{
-                        .button = @enumFromInt(raw.button.type),
+                        .button = @enumFromInt(raw.button.value),
                         .type = @enumFromInt(raw.type),
                     },
                 },

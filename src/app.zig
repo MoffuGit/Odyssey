@@ -159,6 +159,12 @@ fn displayCallback(display: *Display) bool {
 
             chunks.destroy(state);
         } else {
+            while (state.win.popEvent()) |event| {
+                switch (event.type) {
+                    .mouse_button => state.view.pushEvent(event.type),
+                    else => {},
+                }
+            }
             self.renderFrame(state, false) catch |err| {
                 log.debug("Frame render err={}", .{err});
             };

@@ -62,8 +62,9 @@ pub fn init(self: *View, gpa: Allocator) !void {
 
     for (&self.frame_chunks) |*pool| {
         try pool.init(arena, &.{
-            .{ .capacity = 2048, .chunk_size = @max(Stacks.NODE_SIZE, @sizeOf(Event)) },
+            .{ .capacity = 2048, .chunk_size = Stacks.NODE_SIZE },
             .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
+            .{ .capacity = 128, .chunk_size = @sizeOf(Event) },
         });
     }
 
@@ -121,10 +122,24 @@ pub fn finish(self: *View) void {
 
     self.frame += 1;
 
+    while (self.events.pop()) |evt| {
+        log.debug("evt: {}", .{evt});
+    }
+
     const frame_index = self.frame % self.frame_arenas.len;
 
     _ = self.frame_arenas[frame_index].reset(.retain_capacity);
     _ = self.frame_chunks[frame_index].reset();
+}
+
+pub fn pushEvent(self: *View, @"type": win.EventType) void {
+    const chunks = self.frameChunks();
+
+    const event = chunks.create(Event) catch @panic("Chunk Overflow");
+
+    event.* = .{ .type = @"type" };
+
+    self.events.append(event);
 }
 
 pub fn signal(self: *View, blk: *Block) Signal {
@@ -369,12 +384,9 @@ pub fn spacer(self: *View, sizing: Sizing) void {
 }
 
 const Event = struct {
-    next: ?*Event,
-    prev: ?*Event,
-    type: union(enum) {
-        press: win.MouseButton,
-        release: win.MouseButton,
-    },
+    next: ?*Event = null,
+    prev: ?*Event = null,
+    type: win.EventType,
 };
 
 const Stacks = TaggedLinkedList(union(enum) {
