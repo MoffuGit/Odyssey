@@ -85,11 +85,10 @@ pub fn deinit(self: *View) void {
 }
 
 pub fn begin(self: *View, window: Window, resize: bool) !void {
-    self.reset();
-    errdefer self.reset();
-
     const size = try window.size();
     const mouse = try window.mouse();
+
+    self.reset();
 
     if (resize) {
         self.mouse = .{ -1.0, -1.0 };
