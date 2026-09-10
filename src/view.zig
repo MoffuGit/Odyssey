@@ -257,7 +257,10 @@ pub fn pushAttr(self: *View, attr: Attribute) void {
 
 pub fn popAttr(self: *View, comptime field: StackField) void {
     assert(self.pop_flags & stackFlag(field) == 0);
-    if (self.stacks.pop(field) == null) unreachable;
+
+    const chunks = self.frameChunks();
+    const node = self.stacks.pop(field) orelse unreachable;
+    chunks.destroy(node);
 }
 
 pub fn popAttrs(self: *View, comptime fields: []const StackField) void {
