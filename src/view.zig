@@ -105,6 +105,15 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
     self.pushAttr(.{ .parent = self.root.? });
 }
 
+fn reset(self: *View) void {
+    self.root = null;
+    self.stacks = .empty;
+    self.pop_flags = 0;
+    self.block_count = 0;
+
+    if (self.active == null) self.hot = null;
+}
+
 pub fn finish(self: *View) void {
     const root = self.root orelse unreachable;
 
@@ -335,15 +344,6 @@ fn frameArena(self: *View) Allocator {
 
 fn frameChunks(self: *View) Allocator {
     return self.frame_chunks[self.frame % self.frame_arenas.len].allocator();
-}
-
-fn reset(self: *View) void {
-    self.root = null;
-    self.stacks = .empty;
-    self.pop_flags = 0;
-    self.block_count = 0;
-
-    if (self.active == null) self.hot = null;
 }
 
 fn flagStack(self: *View, field: StackField) void {
