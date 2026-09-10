@@ -35,12 +35,15 @@ frame_chunks: [2]chunk_pool.ChunkAllocator,
 stacks: Stacks,
 pop_flags: u64,
 
+events: DoublyLinkedList(Event),
+
 cache: []DoublyLinkedList(Cache),
 
 chunks: chunk_pool.ChunkAllocator,
 
 pub fn init(self: *View, gpa: Allocator) !void {
     self.* = .{
+        .events = .empty,
         .mouse = @splat(0.0),
         .cache = undefined,
         .arena = .init(gpa),
@@ -59,7 +62,7 @@ pub fn init(self: *View, gpa: Allocator) !void {
 
     for (&self.frame_chunks) |*pool| {
         try pool.init(arena, &.{
-            .{ .capacity = 2048, .chunk_size = Stacks.NODE_SIZE },
+            .{ .capacity = 2048, .chunk_size = @max(Stacks.NODE_SIZE, @sizeOf(Event)) },
             .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
         });
     }
@@ -364,6 +367,15 @@ pub fn spacer(self: *View, sizing: Sizing) void {
 
     _ = self.block(.{});
 }
+
+const Event = struct {
+    next: ?*Event,
+    prev: ?*Event,
+    type: union(enum) {
+        press: win.MouseButton,
+        release: win.MouseButton,
+    },
+};
 
 const Stacks = TaggedLinkedList(union(enum) {
     parent: *Block,
