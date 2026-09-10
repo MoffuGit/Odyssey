@@ -216,7 +216,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 view.spacer(.grow, .{});
 
                 view.rounded(12.0);
-                view.border(14, .{ 0.0, 0.0, 0.0, 1.0 });
+                view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
 
                 view.background(.{ 1.0, 0.647, 0.0, 1.0 });
                 view.spacer(.{ .fixed = 100 }, .{ .border = true, .background = true });
@@ -248,20 +248,29 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
     var node = window_state.view.root;
     while (node) |box| : (node = box.nextPreOrder()) {
-        const rect = box.rect[0] ++ box.rect[1];
+        var rect = box.rect[0] ++ box.rect[1];
 
         if (box.flags.border) {
             const thickness = box.thickness;
+            var radius = box.radius;
+            for (0..radius.len) |idx| {
+                radius[idx] += thickness;
+            }
 
             try frame.rect(.{
-                .position = .{ rect[0] - thickness, rect[1] - thickness, rect[2] + thickness, rect[3] + thickness },
+                .position = rect,
                 .color_0 = box.border,
                 .color_1 = box.border,
                 .color_2 = box.border,
                 .color_3 = box.border,
-                .corner_rads = .{ box.radius[0] + thickness, box.radius[1] + thickness, box.radius[2] + thickness, box.radius[3] + thickness },
+                .corner_rads = radius,
                 .border = thickness,
             });
+
+            rect[0] += thickness;
+            rect[1] += thickness;
+            rect[2] -= thickness;
+            rect[3] -= thickness;
         }
 
         if (box.flags.background) {
