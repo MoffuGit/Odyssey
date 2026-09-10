@@ -224,8 +224,9 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 view.rounded(12.0);
                 view.background(.{ 1.0, 0.647, 0.0, 1.0 });
                 view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
+                view.height(.{ .fixed = 100 });
 
-                view.spacer(.{ .fixed = 100 });
+                if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
 
                 view.shrink(1.0);
                 view.spacer(.grow);
@@ -236,10 +237,9 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
             break :green green;
         };
+        const green_signal = view.signal(green);
 
-        if (view.signal(green).hovered) {
-            green.color = .{ 0.0, 1.0, 0.5, 1.0 };
-        }
+        if (green_signal.hovered) green.color = .{ 0.0, 1.0, 0.5, 1.0 };
 
         view.background(.{ 0.0, 0.0, 1.0, 1.0 });
         view.spacer(.{ .fixed = 100 });

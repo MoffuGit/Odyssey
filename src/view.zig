@@ -35,6 +35,9 @@ frame_chunks: [2]chunk_pool.ChunkAllocator,
 stacks: Stacks,
 pop_flags: u64,
 
+hot: ?u64,
+active: ?u64,
+
 events: DoublyLinkedList(Event),
 
 cache: []DoublyLinkedList(Cache),
@@ -43,6 +46,8 @@ chunks: chunk_pool.ChunkAllocator,
 
 pub fn init(self: *View, gpa: Allocator) !void {
     self.* = .{
+        .active = null,
+        .hot = null,
         .events = .empty,
         .mouse = @splat(0.0),
         .cache = undefined,
@@ -147,17 +152,54 @@ pub fn signal(self: *View, blk: *Block) Signal {
     const mouse = self.mouse;
     const rect = blk.rect;
 
-    if (rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
-        rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
-    {
-        _signal.mouseover = true;
+    const in_bounds = rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
+        rect[0][1] <= mouse[1] and mouse[1] < rect[1][1];
+
+    var node = self.events.first;
+
+    while (node) |event| {
+        node = event.next;
+
+        var consumed = false;
+
+        switch (event.type) {
+            .mouse_button => |data| {
+                if (flags.mouse and
+                    data.type == .mouse_button_pressed and
+                    in_bounds)
+                {
+                    consumed = true;
+                    self.hot = blk.key;
+                    self.active = blk.key;
+                    _signal.mouse_pressed = true;
+                }
+
+                if (flags.mouse and
+                    data.type == .mouse_button_released and
+                    self.active == blk.key)
+                {
+                    consumed = true;
+                    self.active = null;
+                    _signal.mouse_released = true;
+                    if (in_bounds) _signal.clicked = true else self.hot = null;
+                }
+            },
+            else => unreachable,
+        }
+
+        if (consumed) self.events.remove(event);
     }
 
-    if (flags.mouse and
-        rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
-        rect[0][1] <= mouse[1] and mouse[1] < rect[1][1])
+    if (flags.mouse and in_bounds and
+        (self.hot == null or self.hot == blk.key) and
+        (self.active == null or self.active == blk.key))
     {
         _signal.hovered = true;
+        self.hot = blk.key;
+    }
+
+    if (in_bounds) {
+        _signal.mouse_over = true;
     }
 
     return _signal;
@@ -172,9 +214,9 @@ pub fn fmt(self: *View, comptime format: []const u8, args: anytype) ![]u8 {
     return std.fmt.bufPrint(buffer, format, args) catch unreachable;
 }
 
-pub fn blockStr(self: *View, string: []const u8, flags: Block.Flags) *Block {
-    const chunk = if (std.mem.find(u8, string, "@@@")) |index|
-        string[index + "@@@".len ..]
+pub fn blockStr(self: *View, str: []const u8, flags: Block.Flags) *Block {
+    const chunk = if (std.mem.find(u8, str, "@@@")) |index|
+        str[index + "@@@".len ..]
     else
         "";
 
@@ -300,6 +342,8 @@ fn reset(self: *View) void {
     self.stacks = .empty;
     self.pop_flags = 0;
     self.block_count = 0;
+
+    if (self.active == null) self.hot = null;
 }
 
 fn flagStack(self: *View, field: StackField) void {
@@ -380,6 +424,12 @@ pub fn spacer(self: *View, sizing: Sizing) void {
     _ = self.block(.{});
 }
 
+pub fn button(self: *View, str: []const u8) Signal {
+    const blk = self.blockStr(str, .{ .mouse = true });
+
+    return self.signal(blk);
+}
+
 const Event = struct {
     next: ?*Event = null,
     prev: ?*Event = null,
@@ -431,11 +481,17 @@ pub const Sizing = union(enum) {
 pub const Signal = packed struct {
     const none: @This() = .{
         .hovered = false,
-        .mouseover = false,
+        .mouse_over = false,
+        .mouse_pressed = false,
+        .mouse_released = false,
+        .clicked = false,
     };
 
     hovered: bool,
-    mouseover: bool,
+    mouse_over: bool,
+    mouse_pressed: bool,
+    mouse_released: bool,
+    clicked: bool,
 };
 
 pub const Block = struct {
@@ -472,6 +528,8 @@ pub const Block = struct {
         background: bool = false,
         border: bool = false,
     };
+
+    const FlagBits = u5;
 
     pub const empty: Block = .{
         .rect = @splat(@splat(0.0)),
@@ -510,8 +568,8 @@ pub const Block = struct {
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
         if (view.stacks.get(.height_shrink).head) |node| self.shrink[1] = clamp(node.value, 0.0, 1.0);
 
-        const stack_flags: u5 = if (view.stacks.get(.flags).head) |node| @bitCast(node.value) else 0;
-        self.flags = @bitCast(@as(u5, @bitCast(flags)) | stack_flags);
+        const stack_flags: FlagBits = if (view.stacks.get(.flags).head) |node| @bitCast(node.value) else 0;
+        self.flags = @bitCast(@as(FlagBits, @bitCast(flags)) | stack_flags);
 
         if (self.flags.background) {
             if (view.stacks.get(.background).head) |node| self.color = node.value;
