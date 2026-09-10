@@ -288,7 +288,7 @@ fn flagStack(self: *View, field: StackField) void {
     self.pop_flags |= stackFlag(field);
 }
 
-fn popFlagged(self: *View) void {
+fn blockCompleted(self: *View) void {
     inline for (@typeInfo(Stacks.Tag).@"enum".fields) |field| {
         const flag = @as(u64, 1) << field.value;
         if (self.pop_flags & flag != 0) {
@@ -296,6 +296,8 @@ fn popFlagged(self: *View) void {
             if (self.stacks.pop(@enumFromInt(field.value)) == null) unreachable;
         }
     }
+
+    self.block_count += 1;
 }
 
 pub fn shrink(self: *View, per: f32) void {
@@ -320,13 +322,24 @@ pub fn height(self: *View, sizing: Sizing) void {
     self.nextAttr(.{ .height = sizing });
 }
 
+pub fn nextFlag(self: *View) *Block.Flags {
+    if (self.pop_flags & stackFlag(.flags) == 0) {
+        self.nextAttr(.{ .flags = .{} });
+    }
+
+    const h = self.stacks.get(.flags).head orelse unreachable;
+    return &h.value;
+}
+
 pub fn background(self: *View, color: [4]f32) void {
     self.nextAttr(.{ .background = color });
+    self.nextFlag().background = true;
 }
 
 pub fn border(self: *View, thickness: f32, color: [4]f32) void {
     self.nextAttr(.{ .border = color });
     self.nextAttr(.{ .thickness = thickness });
+    self.nextFlag().border = true;
 }
 
 pub fn col(self: *View) void {
@@ -487,8 +500,7 @@ pub const Block = struct {
 
         self.touched_frame = view.frame;
 
-        view.block_count += 1;
-        view.popFlagged();
+        view.blockCompleted();
     }
 
     pub fn reset(self: *Block) void {

@@ -189,15 +189,13 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         view.pushAttr(.{ .height = .grow });
 
         view.background(.{ 1.0, 0.0, 0.0, 1.0 });
-        view.nextAttr(.{ .flags = .{ .background = true } });
-
         view.spacer(.{ .fixed = 100 });
 
         const green = green: {
             view.shrink(1.0);
             view.background(.{ 0.0, 1.0, 0.0, 1.0 });
 
-            const green = view.blockStr("@@@green", .{ .mouse = true, .background = true });
+            const green = view.blockStr("@@@green", .{ .mouse = true });
 
             view.pushAttr(.{ .parent = green });
             defer view.popAttr(.parent);
@@ -216,8 +214,6 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
                 view.shrink(1.0);
                 view.spacer(.grow);
-
-                view.nextAttr(.{ .flags = .{ .background = true, .border = true } });
 
                 view.rounded(12.0);
                 view.background(.{ 1.0, 0.647, 0.0, 1.0 });
@@ -239,7 +235,6 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             green.color = .{ 0.0, 1.0, 0.5, 1.0 };
         }
 
-        view.nextAttr(.{ .flags = .{ .background = true } });
         view.background(.{ 0.0, 0.0, 1.0, 1.0 });
         view.spacer(.{ .fixed = 100 });
     }
