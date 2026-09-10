@@ -88,7 +88,12 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
     const size = try window.size();
     const mouse = try window.mouse();
 
-    self.reset();
+    self.root = null;
+    self.stacks = .empty;
+    self.pop_flags = 0;
+    self.block_count = 0;
+
+    if (self.active == null) self.hot = null;
 
     if (resize) {
         self.mouse = .{ -1.0, -1.0 };
@@ -102,15 +107,6 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
     self.root = self.block(.{});
 
     self.pushAttr(.{ .parent = self.root.? });
-}
-
-fn reset(self: *View) void {
-    self.root = null;
-    self.stacks = .empty;
-    self.pop_flags = 0;
-    self.block_count = 0;
-
-    if (self.active == null) self.hot = null;
 }
 
 pub fn finish(self: *View) void {
