@@ -121,10 +121,7 @@ pub fn finish(self: *View) void {
     }
 
     self.frame += 1;
-
-    while (self.events.pop()) |evt| {
-        log.debug("evt: {}", .{evt});
-    }
+    self.events = .empty;
 
     const frame_index = self.frame % self.frame_arenas.len;
 
