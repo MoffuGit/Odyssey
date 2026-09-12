@@ -21,7 +21,8 @@ const Metal = @import("renderer/metal.zig");
 const win = @import("window.zig");
 const Window = win.Window;
 
-const PAGE_SIZE = heap.pageSize();
+const PAGE_SIZE = heap.page_size_min;
+const RECT_CAPACITY = PAGE_SIZE / std.math.gcd(PAGE_SIZE, @sizeOf(Rect));
 
 const log = std.log.scoped(.render);
 
@@ -62,9 +63,10 @@ pub fn renderFrame(renderer: *Renderer, handle: *Handle, frame_state: *FrameStat
     });
     defer pass.complete();
 
+    // bytesNoCopy requires both ends of the wrapped region to be page-aligned.
     const uniform = renderer.buffer(
-        @ptrCast(frame_state.uniforms),
-        @sizeOf(Uniforms),
+        @ptrCast(&frame_state.uniforms),
+        PAGE_SIZE,
         .{ .storage_mode = .shared, .cpu_cache_mode = .write_combined },
     );
 
@@ -75,9 +77,10 @@ pub fn renderFrame(renderer: *Renderer, handle: *Handle, frame_state: *FrameStat
         const ptr = curr.pool.ptr;
         const instances = curr.pool.reserved;
 
+        // Bind the complete page-sized pool; the draw still uses only reserved chunks.
         const rect = renderer.buffer(
             @ptrCast(ptr),
-            @sizeOf(Rect) * instances,
+            curr.pool.len,
             .{ .storage_mode = .shared, .cpu_cache_mode = .write_combined },
         );
         defer rect.release();
@@ -112,7 +115,7 @@ pub const Rect = extern struct {
 pub const FrameState = struct {
     arena: heap.ArenaAllocator,
     rects: BufferList,
-    uniforms: *Uniforms,
+    uniforms: Uniforms align(PAGE_SIZE),
 
     pub fn init(self: *FrameState, gpa: Allocator) !void {
         self.* = .{
@@ -122,20 +125,6 @@ pub const FrameState = struct {
         };
     }
 
-    pub fn uniform(self: *FrameState, data: Uniforms) !void {
-        const arena = self.arena.allocator();
-
-        const buffer = arena.rawAlloc(
-            @sizeOf(Uniforms),
-            .fromByteUnits(PAGE_SIZE),
-            @returnAddress(),
-        ) orelse return error.OutOfMemory;
-        const ptr: *Uniforms = @ptrCast(@alignCast(buffer));
-        ptr.* = data;
-
-        self.uniforms = ptr;
-    }
-
     pub fn rect(self: *FrameState, data: Rect) !void {
         const arena = self.arena.allocator();
         const list = &self.rects;
@@ -143,7 +132,7 @@ pub const FrameState = struct {
         if (list.nodes.is_empty()) {
             const node = try arena.create(BufferNode);
             try node.init(.{
-                .capacity = 256,
+                .capacity = RECT_CAPACITY,
                 .chunk_size = @sizeOf(Rect),
                 .alignment = .fromByteUnits(PAGE_SIZE),
             }, arena);
@@ -155,7 +144,7 @@ pub const FrameState = struct {
 
             const node = try arena.create(BufferNode);
             try node.init(.{
-                .capacity = 256,
+                .capacity = RECT_CAPACITY,
                 .chunk_size = @sizeOf(Rect),
                 .alignment = .fromByteUnits(PAGE_SIZE),
             }, arena);
@@ -208,4 +197,15 @@ pub const BufferList = struct {
 
 test {
     _ = FrameState;
+}
+
+test "FrameState uniforms occupy a page-aligned region" {
+    var frame: FrameState = undefined;
+
+    try testing.expectEqual(0, @intFromPtr(&frame.uniforms) % PAGE_SIZE);
+    try testing.expect(@offsetOf(FrameState, "uniforms") + PAGE_SIZE <= @sizeOf(FrameState));
+}
+
+test "rectangle pools occupy page-aligned regions" {
+    try testing.expectEqual(0, (@sizeOf(Rect) * RECT_CAPACITY) % PAGE_SIZE);
 }

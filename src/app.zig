@@ -250,7 +250,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
 
     const size = try window_state.win.size();
 
-    try frame.uniform(.{ .viewport_size = .{ size.w, size.h } });
+    frame.uniforms = .{ .viewport_size = .{ size.w, size.h } };
 
     var node = window_state.view.root;
     while (node) |box| : (node = box.nextPreOrder()) {
