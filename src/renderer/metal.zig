@@ -154,7 +154,7 @@ pub const Buffer = struct {
             .buffer = device.msgSend(
                 objc.Object,
                 "newBufferWithBytesNoCopy:length:options:deallocator:",
-                .{ chunk, @as(c_ulong, @intCast(len)), resource_options },
+                .{ chunk, @as(c_ulong, @intCast(len)), resource_options, @as(?*anyopaque, null) },
             ),
         };
     }
@@ -243,7 +243,7 @@ pub const Frame = struct {
         self.buffer.msgSend(void, "commit", .{});
 
         if (sync) {
-            self.buffer.msgSend(void, "waitUntilScheduled", .{});
+            self.buffer.msgSend(void, "waitUntilCompleted", .{});
             CompletionBlock.invoke(&self.block, .{});
             target.drawable.msgSend(void, "present", .{});
         }
