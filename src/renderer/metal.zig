@@ -271,7 +271,6 @@ pub const RenderPass = struct {
         uniforms: ?objc.Object = null,
         /// MTLBuffer
         buffers: []const ?objc.Object = &.{},
-        textures: []const ?objc.Object = &.{},
         draw: Draw,
 
         /// Describes the draw call for this step.
@@ -414,21 +413,6 @@ pub const RenderPass = struct {
             );
         }
 
-        // Set textures.
-        for (s.textures, 0..) |t, i| if (t) |tex| {
-            self.encoder.msgSend(
-                void,
-                objc.sel("setVertexTexture:atIndex:"),
-                .{ tex.value, @as(c_ulong, i) },
-            );
-            self.encoder.msgSend(
-                void,
-                objc.sel("setFragmentTexture:atIndex:"),
-                .{ tex.value, @as(c_ulong, i) },
-            );
-        };
-
-        // Draw!
         self.encoder.msgSend(
             void,
             objc.sel("drawPrimitives:vertexStart:vertexCount:instanceCount:"),
