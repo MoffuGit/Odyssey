@@ -1,3 +1,4 @@
+pub const Atlas = @import("datastruct/atlas.zig");
 pub const btree = @import("datastruct/btree.zig");
 pub const doubly_linked_list = @import("datastruct/doubly_linked_list.zig");
 pub const DoublyLinkedList = doubly_linked_list.DoublyLinkedList;
@@ -16,6 +17,8 @@ pub const tagged_linked_list = @import("datastruct/tagged_linked_list.zig");
 pub const TaggedLinkedList = tagged_linked_list.TaggedLinkedList;
 
 test {
+    _ = Atlas;
+    _ = SwapChain;
     _ = mpsc;
     _ = spsc;
     _ = mem_map;
