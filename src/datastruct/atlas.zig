@@ -18,22 +18,27 @@ const testing = std.testing;
 
 const Atlas = @This();
 
+arena: heap.ArenaAllocator,
+buffer: []u8,
 width: u64,
 height: u64,
 
 pub fn init(self: *Atlas, w: u64, h: u64, alloc: Allocator) !void {
-    self.* = .{ .width = w, .height = h };
-    _ = alloc;
+    self.* = .{ .width = w, .height = h, .arena = .init(alloc), .buffer = undefined };
+
+    const arena = self.arena.allocator();
+    errdefer self.arena.deinit();
+
+    self.buffer = try arena.alloc(u8, w * h);
 }
 
-pub fn deinit(self: *Atlas, alloc: Allocator) void {
-    _ = self;
-    _ = alloc;
+pub fn deinit(self: *Atlas) void {
+    self.arena.deinit();
 }
 
 test "Basic Operations" {
     const gpa = testing.allocator;
     var atlas: Atlas = undefined;
     try atlas.init(50, 50, gpa);
-    defer atlas.deinit(gpa);
+    defer atlas.deinit();
 }
