@@ -18,8 +18,6 @@ const testing = std.testing;
 
 const Atlas = @This();
 
-arena: heap.ArenaAllocator,
-pool: heap.MemoryPool(u8),
 width: u64,
 height: u64,
 
