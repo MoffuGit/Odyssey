@@ -30,17 +30,9 @@ pub const Renderer = renderer: {
     if (!builtin.is_test) break :renderer Metal;
 
     break :renderer struct {
-        pub const Buffer = struct {
-            pub fn release(_: *const @This()) void {}
-        };
-
         pub fn init(_: *Renderer) !void {}
 
         pub fn deinit(_: *Renderer) void {}
-
-        pub fn buffer(_: *Renderer, _: [*]u8, _: usize, _: anytype) Buffer {
-            return .{};
-        }
     };
 };
 
