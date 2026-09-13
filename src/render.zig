@@ -140,7 +140,7 @@ pub const FrameState = struct {
         }
 
         const buffer = ptr: {
-            if (list.nodes.head.?.pool.alloc()) |ptr| break :ptr ptr;
+            if (list.nodes.tail.?.pool.alloc()) |ptr| break :ptr ptr;
 
             const node = try arena.create(BufferNode);
             try node.init(.{
