@@ -263,7 +263,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 radius[idx] += thickness;
             }
 
-            try frame.rect(.{
+            try frame.rect(&app.renderer, .{
                 .position = rect,
                 .color_0 = box.border,
                 .color_1 = box.border,
@@ -280,7 +280,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         }
 
         if (box.flags.background) {
-            try frame.rect(.{
+            try frame.rect(&app.renderer, .{
                 .position = rect,
                 .color_0 = box.color,
                 .color_1 = box.color,

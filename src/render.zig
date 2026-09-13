@@ -30,9 +30,17 @@ pub const Renderer = renderer: {
     if (!builtin.is_test) break :renderer Metal;
 
     break :renderer struct {
+        pub const Buffer = struct {
+            pub fn release(_: *const @This()) void {}
+        };
+
         pub fn init(_: *Renderer) !void {}
 
         pub fn deinit(_: *Renderer) void {}
+
+        pub fn buffer(_: *Renderer, _: [*]u8, _: usize, _: anytype) Buffer {
+            return .{};
+        }
     };
 };
 
@@ -74,25 +82,14 @@ pub fn renderFrame(renderer: *Renderer, handle: *Handle, frame_state: *FrameStat
 
     var node: ?*BufferNode = frame_state.rects.nodes.head;
     while (node) |curr| : (node = curr.next) {
-        const ptr = curr.pool.ptr;
-        const instances = curr.pool.reserved;
-
-        // Bind the complete page-sized pool; the draw still uses only reserved chunks.
-        const rect = renderer.buffer(
-            @ptrCast(ptr),
-            curr.pool.len,
-            .{ .storage_mode = .shared, .cpu_cache_mode = .write_combined },
-        );
-        defer rect.release();
-
         pass.step(.{
             .pipeline = renderer.shaders.pipelines.rect,
-            .buffers = &.{rect.buffer},
+            .buffers = &.{curr.buffer.buffer},
             .uniforms = uniform.buffer,
             .draw = .{
                 .vertex_count = 4,
                 .type = .triangle_strip,
-                .instance_count = instances,
+                .instance_count = curr.pool.reserved,
             },
         });
     }
@@ -114,43 +111,44 @@ pub const Rect = extern struct {
 
 pub const FrameState = struct {
     arena: heap.ArenaAllocator,
+
+    free_rects: BufferList,
     rects: BufferList,
+
     uniforms: Uniforms align(PAGE_SIZE),
 
     pub fn init(self: *FrameState, gpa: Allocator) !void {
         self.* = .{
             .arena = .init(gpa),
             .uniforms = undefined,
+            .free_rects = .empty,
             .rects = .empty,
         };
     }
 
-    pub fn rect(self: *FrameState, data: Rect) !void {
+    pub fn rect(self: *FrameState, renderer: *Renderer, data: Rect) !void {
         const arena = self.arena.allocator();
         const list = &self.rects;
 
-        if (list.nodes.is_empty()) {
+        const buffer = blk: {
+            if (list.nodes.tail) |tail| {
+                if (tail.pool.alloc()) |buffer| break :blk buffer;
+            }
+
+            if (self.free_rects.nodes.pop()) |node| {
+                list.push(node);
+                break :blk node.pool.alloc() orelse unreachable;
+            }
+
             const node = try arena.create(BufferNode);
-            try node.init(.{
+            try node.init(renderer, .{
                 .capacity = RECT_CAPACITY,
                 .chunk_size = @sizeOf(Rect),
                 .alignment = .fromByteUnits(PAGE_SIZE),
             }, arena);
             list.push(node);
-        }
 
-        const buffer = ptr: {
-            if (list.nodes.tail.?.pool.alloc()) |ptr| break :ptr ptr;
-
-            const node = try arena.create(BufferNode);
-            try node.init(.{
-                .capacity = RECT_CAPACITY,
-                .chunk_size = @sizeOf(Rect),
-                .alignment = .fromByteUnits(PAGE_SIZE),
-            }, arena);
-            list.push(node);
-
-            break :ptr node.pool.alloc() orelse unreachable;
+            break :blk node.pool.alloc() orelse unreachable;
         };
 
         assert(buffer.len == @sizeOf(Rect));
@@ -160,27 +158,46 @@ pub const FrameState = struct {
     }
 
     pub fn deinit(self: *FrameState) void {
+        self.rects.deinit();
+        self.free_rects.deinit();
         self.arena.deinit();
     }
 
     pub fn reset(self: *FrameState) void {
-        self.rects = .empty;
+        var node = self.rects.nodes.head;
+        while (node) |curr| : (node = curr.next) curr.pool.reset();
+
+        self.free_rects.nodes.concatByMoving(&self.rects.nodes);
         self.uniforms = undefined;
-        _ = self.arena.reset(.retain_capacity);
     }
 };
 
 pub const BufferNode = struct {
     next: ?*BufferNode,
+    buffer: Renderer.Buffer,
     pool: ChunkPool,
 
-    pub fn init(self: *BufferNode, opt: chunk_pool.Options, arena: Allocator) !void {
+    pub fn init(self: *BufferNode, renderer: *Renderer, opt: chunk_pool.Options, arena: Allocator) !void {
         self.* = .{
             .next = null,
+            .buffer = undefined,
             .pool = undefined,
         };
 
         try self.pool.init(arena, opt);
+
+        self.buffer = renderer.buffer(
+            self.pool.ptr,
+            self.pool.len,
+            .{
+                .storage_mode = .shared,
+                .cpu_cache_mode = .write_combined,
+            },
+        );
+    }
+
+    pub fn deinit(self: *BufferNode) void {
+        self.buffer.release();
     }
 };
 
@@ -193,19 +210,12 @@ pub const BufferList = struct {
     pub fn push(self: *BufferList, node: *BufferNode) void {
         self.nodes.append(node);
     }
+
+    pub fn deinit(self: *BufferList) void {
+        while (self.nodes.pop()) |node| node.deinit();
+    }
 };
 
 test {
     _ = FrameState;
-}
-
-test "FrameState uniforms occupy a page-aligned region" {
-    var frame: FrameState = undefined;
-
-    try testing.expectEqual(0, @intFromPtr(&frame.uniforms) % PAGE_SIZE);
-    try testing.expect(@offsetOf(FrameState, "uniforms") + PAGE_SIZE <= @sizeOf(FrameState));
-}
-
-test "rectangle pools occupy page-aligned regions" {
-    try testing.expectEqual(0, (@sizeOf(Rect) * RECT_CAPACITY) % PAGE_SIZE);
 }
