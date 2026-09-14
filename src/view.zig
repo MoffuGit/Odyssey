@@ -8,12 +8,12 @@ const heap = std.heap;
 const meta = std.meta;
 const testing = std.testing;
 const Wyhash = std.hash.Wyhash;
-const rng2 = @import("math.zig").rng2;
 
 const chunk_pool = @import("chunk_pool.zig");
 const datastruct = @import("datastruct.zig");
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 const TaggedLinkedList = datastruct.TaggedLinkedList;
+const rng2 = @import("math.zig").rng2;
 const win = @import("window.zig");
 const Window = win.Window;
 
