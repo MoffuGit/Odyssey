@@ -756,7 +756,7 @@ pub const Block = struct {
                 child.rect[0][axis] = current.rect[0][axis] + child.position[axis];
                 child.rect[1][axis] = child.rect[0][axis] + child.size[axis];
 
-                for (0..2) |p| {
+                inline for (0..2) |p| {
                     child.rect[p][axis] = @floor(child.rect[p][axis]);
                 }
             }
