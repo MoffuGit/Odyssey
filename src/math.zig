@@ -1,38 +1,28 @@
 const std = @import("std");
-const debug = std.debug;
-const assert = debug.assert;
 
-///[min, max) range
-pub fn Rng(T: type) type {
-    return struct {
-        min: T,
-        max: T,
+pub const rng = struct {
+    pub inline fn contains(r: anytype, value: @typeInfo(@TypeOf(r)).array.child) bool {
+        return value >= r[0] and value < r[1];
+    }
 
-        pub inline fn new(min: T, max: T) @This() {
-            return .{ .min = min, .max = max };
-        }
+    pub inline fn dim(r: anytype) @typeInfo(@TypeOf(r)).array.child {
+        return if (r[1] > r[0]) r[1] - r[0] else 0;
+    }
 
-        pub inline fn contains(self: @This(), value: T) bool {
-            return value >= self.min and value < self.max;
-        }
+    pub inline fn empty(r: anytype) bool {
+        return r[0] >= r[1];
+    }
 
-        pub inline fn dim(self: @This()) T {
-            return if (self.max > self.min) self.max - self.min else 0;
-        }
+    pub inline fn intersect(a: anytype, b: anytype) @TypeOf(a) {
+        return .{ @max(a[0], b[0]), @min(a[1], b[1]) };
+    }
+};
 
-        pub inline fn empty(self: @This()) bool {
-            return self.min >= self.max;
-        }
-
-        pub inline fn intersect(a: @This(), b: @This()) @This() {
-            return .new(@max(a.min, b.min), @min(a.max, b.max));
-        }
-    };
-}
-
-pub const Rngu64 = Rng(u64);
-
-pub const Rngu64Node = struct {
-    range: Rngu64,
-    next: ?*Rngu64Node = null,
+pub const rng2 = struct {
+    pub inline fn contains(r: anytype, value: @typeInfo(@TypeOf(r)).array.child) bool {
+        return r[0][0] <= value[0] and
+            value[0] < r[1][0] and
+            r[0][1] <= value[1] and
+            value[1] < r[1][1];
+    }
 };

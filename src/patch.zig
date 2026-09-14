@@ -13,9 +13,14 @@ const mem_map = datastruct.mem_map;
 const MemMap = mem_map.MemMap;
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const math = @import("math.zig");
-const Rngu64 = math.Rngu64;
+const rng = math.rng;
 
 const log = std.log.scoped(.patch);
+
+const RangeNode = struct {
+    range: [2]u64,
+    next: ?*RangeNode = null,
+};
 
 pub inline fn delta(a: u64, d: i64) u64 {
     return @intCast(@as(i64, @intCast(a)) + d);
@@ -23,7 +28,7 @@ pub inline fn delta(a: u64, d: i64) u64 {
 
 pub const Patch = struct {
     replace: []u8,
-    range: Rngu64,
+    range: [2]u64,
 
     next: ?*Patch = null,
 };
@@ -31,7 +36,7 @@ pub const Patch = struct {
 pub const PatchList = struct {
     list: SinglyLinkedList(Patch) = .empty,
 
-    pub fn push(self: *PatchList, range: Rngu64, replace: []u8, alloc: Allocator) !void {
+    pub fn push(self: *PatchList, range: [2]u64, replace: []u8, alloc: Allocator) !void {
         const patch = try alloc.create(Patch);
         patch.* = .{
             .range = range,
@@ -42,13 +47,13 @@ pub const PatchList = struct {
 };
 
 pub const Line = struct {
-    memmap_ranges: []Rngu64,
-    range: Rngu64,
+    memmap_ranges: [][2]u64,
+    range: [2]u64,
     delta: i64,
 
     next: ?*Line = null,
 
-    pub fn new(ranges: []Rngu64, range: Rngu64, d: i64) Line {
+    pub fn new(ranges: [][2]u64, range: [2]u64, d: i64) Line {
         return .{ .memmap_ranges = ranges, .range = range, .delta = d };
     }
 };
@@ -61,18 +66,18 @@ pub const LineMap = struct {
         const l = try alloc.create(Line);
         l.* = line;
 
-        self.total += l.range.dim();
+        self.total += rng.dim(l.range);
         self.lines.append(l);
     }
 
-    pub fn rngForLine(self: *const LineMap, line: u64) Rngu64 {
-        var res: Rngu64 = undefined;
+    pub fn rngForLine(self: *const LineMap, line: u64) [2]u64 {
+        var res: [2]u64 = undefined;
         var node = self.lines.head;
         while (node) |n| : (node = n.next) {
-            if (n.range.contains(line)) {
-                res = n.memmap_ranges[line - n.range.min];
-                res.min = delta(res.min, n.delta);
-                res.max = delta(res.max, n.delta);
+            if (rng.contains(n.range, line)) {
+                res = n.memmap_ranges[line - n.range[0]];
+                res[0] = delta(res[0], n.delta);
+                res[1] = delta(res[1], n.delta);
                 break;
             }
         }
@@ -86,16 +91,16 @@ pub const LineMap = struct {
         bkl: {
             var node = self.lines.head;
             while (node) |n| : (node = n.next) {
-                if (n.range.empty()) continue;
+                if (rng.empty(n.range)) continue;
 
-                const dim = n.range.dim();
+                const dim = rng.dim(n.range);
 
-                const off_range: Rngu64 = .new(
-                    delta(n.memmap_ranges[0].min, n.delta),
-                    delta(n.memmap_ranges[dim - 1].max, n.delta),
-                );
+                const off_range: [2]u64 = .{
+                    delta(n.memmap_ranges[0][0], n.delta),
+                    delta(n.memmap_ranges[dim - 1][1], n.delta),
+                };
 
-                if (!off_range.contains(off)) continue;
+                if (!rng.contains(off_range, off)) continue;
 
                 var min_idx: u64 = 0;
                 var max_idx = dim - 1;
@@ -104,13 +109,13 @@ pub const LineMap = struct {
                     const mid_idx = (max_idx + min_idx) / 2;
 
                     const memmap_range = n.memmap_ranges[mid_idx];
-                    const max_range = delta(memmap_range.max, n.delta);
-                    const min_range = delta(memmap_range.min, n.delta);
+                    const max_range = delta(memmap_range[1], n.delta);
+                    const min_range = delta(memmap_range[0], n.delta);
 
                     if (max_range < off) min_idx = mid_idx + 1;
                     if (off < min_range) max_idx = mid_idx - 1;
                     if (min_range <= off and off <= max_range) {
-                        res = n.range.min + mid_idx;
+                        res = n.range[0] + mid_idx;
                         break :bkl;
                     }
                 }
@@ -131,8 +136,8 @@ pub const Patched = struct {
         var last_linemap: LineMap = .{};
         var last_size: u64 = buffer.len;
 
-        try last_memmap.push(.new(0, buffer.len), buffer.ptr, alloc);
-        try last_linemap.push(.new(info.line_ranges, .new(1, info.line_count + 1), 0), alloc);
+        try last_memmap.push(.{ 0, buffer.len }, buffer.ptr, alloc);
+        try last_linemap.push(Line.new(info.line_ranges, .{ 1, info.line_count + 1 }, 0), alloc);
 
         const patched_buffer = try alloc.alloc(u8, 1024);
         defer alloc.free(patched_buffer);
@@ -145,28 +150,28 @@ pub const Patched = struct {
             var next_memmap: MemMap = .{};
             var next_linemap: LineMap = .{};
 
-            const size_delta = @as(i64, @intCast(patch.replace.len)) - @as(i64, @intCast(patch.range.dim()));
-            const pre_range: Rngu64 = .new(0, patch.range.min);
-            const post_range: Rngu64 = .new(patch.range.max, last_size);
+            const size_delta = @as(i64, @intCast(patch.replace.len)) - @as(i64, @intCast(rng.dim(patch.range)));
+            const pre_range: [2]u64 = .{ 0, patch.range[0] };
+            const post_range: [2]u64 = .{ patch.range[1], last_size };
 
             var map_node = last_memmap.ranges.head;
             while (map_node) |map| : (map_node = map.next) {
                 const range = map.vaddr_range;
-                const range_x_pre: Rngu64 = .intersect(pre_range, range);
-                const range_x_post: Rngu64 = .intersect(post_range, range);
+                const range_x_pre: [2]u64 = rng.intersect(pre_range, range);
+                const range_x_post: [2]u64 = rng.intersect(post_range, range);
 
-                if (!range_x_pre.empty()) {
-                    try next_memmap.push(range_x_pre, map.base + (range_x_pre.min - range.min), temp);
+                if (!rng.empty(range_x_pre)) {
+                    try next_memmap.push(range_x_pre, map.base + (range_x_pre[0] - range[0]), temp);
                 }
 
-                if (!range_x_post.empty()) {
-                    const range_x_post_shifted: Rngu64 = .new(
-                        delta(range_x_post.min, size_delta),
-                        delta(range_x_post.max, size_delta),
-                    );
+                if (!rng.empty(range_x_post)) {
+                    const range_x_post_shifted: [2]u64 = .{
+                        delta(range_x_post[0], size_delta),
+                        delta(range_x_post[1], size_delta),
+                    };
                     try next_memmap.push(
                         range_x_post_shifted,
-                        map.base + (range_x_post.min - range.min),
+                        map.base + (range_x_post[0] - range[0]),
                         temp,
                     );
                 }
@@ -174,30 +179,30 @@ pub const Patched = struct {
 
             if (patch.replace.len != 0) {
                 try next_memmap.push(
-                    .new(patch.range.min, patch.range.min + patch.replace.len),
+                    .{ patch.range[0], patch.range[0] + patch.replace.len },
                     patch.replace.ptr,
                     temp,
                 );
             }
 
-            var replaced_lines_range: Rngu64 = .new(
-                last_linemap.lineFromOffset(patch.range.min),
-                last_linemap.lineFromOffset(patch.range.max),
-            );
-            const pre_lines_range: Rngu64 = .new(1, replaced_lines_range.min);
-            const post_lines_range: Rngu64 = .new(replaced_lines_range.max + 1, last_linemap.total + 1);
+            const replaced_lines_range: [2]u64 = .{
+                last_linemap.lineFromOffset(patch.range[0]),
+                last_linemap.lineFromOffset(patch.range[1]),
+            };
+            const pre_lines_range: [2]u64 = .{ 1, replaced_lines_range[0] };
+            const post_lines_range: [2]u64 = .{ replaced_lines_range[1] + 1, last_linemap.total + 1 };
 
             var line_delta: i64 = 0;
-            line_delta -= @intCast(replaced_lines_range.dim());
+            line_delta -= @intCast(rng.dim(replaced_lines_range));
 
-            var replace_line_range: SinglyLinkedList(math.Rngu64Node) = .empty;
+            var replace_line_range: SinglyLinkedList(RangeNode) = .empty;
             var replaced_lines_count: u64 = 0;
             var last_line_start_off: u64 = 0;
 
             for (patch.replace, 0..) |c, idx| {
                 if (c == '\n') {
-                    const new_range_node = try temp.create(math.Rngu64Node);
-                    new_range_node.* = .{ .range = .new(last_line_start_off, idx) };
+                    const new_range_node = try temp.create(RangeNode);
+                    new_range_node.* = .{ .range = .{ last_line_start_off, idx } };
                     replace_line_range.append(new_range_node);
 
                     line_delta += 1;
@@ -206,8 +211,8 @@ pub const Patched = struct {
                 }
             }
 
-            const new_range_node = try temp.create(math.Rngu64Node);
-            new_range_node.* = .{ .range = .new(last_line_start_off, patch.replace.len) };
+            const new_range_node = try temp.create(RangeNode);
+            new_range_node.* = .{ .range = .{ last_line_start_off, patch.replace.len } };
             replace_line_range.append(new_range_node);
 
             replaced_lines_count += 1;
@@ -215,14 +220,14 @@ pub const Patched = struct {
             var line_node = last_linemap.lines.head;
             while (line_node) |line| : (line_node = line.next) {
                 const range = line.range;
-                const range_x_pre: Rngu64 = .intersect(pre_lines_range, range);
-                const range_x_post: Rngu64 = .intersect(post_lines_range, range);
+                const range_x_pre: [2]u64 = rng.intersect(pre_lines_range, range);
+                const range_x_post: [2]u64 = rng.intersect(post_lines_range, range);
 
-                if (!range_x_pre.empty()) {
-                    const off = range_x_pre.min - range.min;
+                if (!rng.empty(range_x_pre)) {
+                    const off = range_x_pre[0] - range[0];
                     try next_linemap.push(
-                        .new(
-                            line.memmap_ranges[off .. off + (range_x_pre.max - range_x_pre.min)],
+                        Line.new(
+                            line.memmap_ranges[off .. off + (range_x_pre[1] - range_x_pre[0])],
                             range_x_pre,
                             line.delta,
                         ),
@@ -230,15 +235,15 @@ pub const Patched = struct {
                     );
                 }
 
-                if (!range_x_post.empty()) {
-                    const range_x_post_shifted: Rngu64 = .new(
-                        delta(range_x_post.min, line_delta),
-                        delta(range_x_post.max, line_delta),
-                    );
-                    const off = range_x_post.min - range.min;
+                if (!rng.empty(range_x_post)) {
+                    const range_x_post_shifted: [2]u64 = .{
+                        delta(range_x_post[0], line_delta),
+                        delta(range_x_post[1], line_delta),
+                    };
+                    const off = range_x_post[0] - range[0];
                     try next_linemap.push(
-                        .new(
-                            line.memmap_ranges[off .. off + (range_x_post.max - range_x_post.min)],
+                        Line.new(
+                            line.memmap_ranges[off .. off + (range_x_post[1] - range_x_post[0])],
                             range_x_post_shifted,
                             line.delta + size_delta,
                         ),
@@ -247,24 +252,24 @@ pub const Patched = struct {
                 }
             }
 
-            const affected_lines_ranges = try temp.alloc(Rngu64, replaced_lines_count);
+            const affected_lines_ranges = try temp.alloc([2]u64, replaced_lines_count);
             var range_node = replace_line_range.head;
             var affected_idx: u64 = 0;
 
             while (range_node) |range| {
-                var affected_range: Rngu64 = .new(
-                    range.range.min + patch.range.min,
-                    range.range.max + patch.range.min,
-                );
+                var affected_range: [2]u64 = .{
+                    range.range[0] + patch.range[0],
+                    range.range[1] + patch.range[1],
+                };
 
                 if (affected_idx == 0) {
-                    affected_range.min = last_linemap.rngForLine(replaced_lines_range.min).min;
+                    affected_range[0] = last_linemap.rngForLine(replaced_lines_range[0])[0];
                 }
 
                 if (affected_idx == replaced_lines_count - 1 and affected_idx >= @max(0, line_delta)) {
-                    const original_range = last_linemap.rngForLine(replaced_lines_range.max);
-                    if (original_range.max > patch.range.max) {
-                        affected_range.max += original_range.max - patch.range.max;
+                    const original_range = last_linemap.rngForLine(replaced_lines_range[1]);
+                    if (original_range[1] > patch.range[1]) {
+                        affected_range[1] += original_range[1] - patch.range[1];
                     }
                 }
 
@@ -274,9 +279,9 @@ pub const Patched = struct {
             }
 
             try next_linemap.push(
-                .new(
+                Line.new(
                     affected_lines_ranges,
-                    .new(replaced_lines_range.min, replaced_lines_range.min + replaced_lines_count),
+                    .{ replaced_lines_range[0], replaced_lines_range[0] + replaced_lines_count },
                     0,
                 ),
                 temp,
@@ -332,11 +337,11 @@ test "Patch Buffer" {
     try info.init(buffer, arena);
 
     var patch_list: PatchList = .{};
-    try patch_list.push(.new(51, 56), try arena.dupe(u8, "about"), arena);
+    try patch_list.push(.{ 51, 56 }, try arena.dupe(u8, "about"), arena);
 
     const patched = try Patched.init(buffer, info, patch_list, arena);
 
     const expected = "This line is about x chars long\nThis other line is about y chars long\nThis line is kinda like z chars long\nThis last line is aboyt z chars long\n\n";
-    const result = try patched.memmap.slice(.new(0, @intCast(patched.size)), arena);
+    const result = try patched.memmap.slice(.{ 0, @intCast(patched.size) }, arena);
     try testing.expectEqualStrings(expected, result);
 }

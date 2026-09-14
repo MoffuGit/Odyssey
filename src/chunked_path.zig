@@ -12,6 +12,7 @@ const datastruct = @import("datastruct.zig");
 const mem_map = datastruct.mem_map;
 const MemMap = mem_map.MemMap;
 const MemMapRng = mem_map.MemMapRng;
+const rng = @import("math.zig").rng;
 
 const log = std.log.scoped(.chunked_path);
 
@@ -42,7 +43,7 @@ pub fn new(path: []const u8, filename_offset: u32, alloc: Allocator) ChunkedPath
         @memcpy(canonical[0..chunk_len], path[offset..end]);
         chunk.* = canonical;
 
-        memmap.push(.{ .min = offset, .max = end }, chunk, alloc) catch @panic("MemMap Range Overflow");
+        memmap.push(.{ offset, end }, chunk, alloc) catch @panic("MemMap Range Overflow");
 
         offset = end;
     }
@@ -75,10 +76,10 @@ pub fn extend(
     var suffix_map = new(suffix, filename_offset, alloc);
 
     while (suffix_map.memmap.ranges.pop()) |node| {
-        const min = node.vaddr_range.min;
-        const max = node.vaddr_range.max;
-
-        node.vaddr_range = .{ .min = path_len + min, .max = path_len + max };
+        node.vaddr_range = .{
+            node.vaddr_range[0] + path_len,
+            node.vaddr_range[1] + path_len,
+        };
 
         new_memmap.ranges.append(node);
     }
@@ -104,18 +105,18 @@ pub fn free(self: *const ChunkedPath, alloc: Allocator) void {
 pub fn read(self: *const ChunkedPath, buffer: []u8) u64 {
     assert(buffer.len >= self.len);
 
-    return self.memmap.read(.{ .min = 0, .max = self.len }, buffer);
+    return self.memmap.read(.{ 0, self.len }, buffer);
 }
 
 pub fn basename(self: *const ChunkedPath, buffer: []u8) u64 {
     const name_len: usize = self.len - self.filename_offset;
     assert(buffer.len >= name_len);
 
-    return self.memmap.read(.{ .min = self.filename_offset, .max = self.len }, buffer[0..name_len]);
+    return self.memmap.read(.{ self.filename_offset, self.len }, buffer[0..name_len]);
 }
 
 pub fn slice(self: *const ChunkedPath, allocator: Allocator) ![]u8 {
-    return try self.memmap.slice(.{ .min = 0, .max = self.len }, allocator);
+    return try self.memmap.slice(.{ 0, self.len }, allocator);
 }
 
 pub fn cmp(self: ChunkedPath, other: ChunkedPath) math.Order {

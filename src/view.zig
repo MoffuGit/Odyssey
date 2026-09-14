@@ -8,6 +8,7 @@ const heap = std.heap;
 const meta = std.meta;
 const testing = std.testing;
 const Wyhash = std.hash.Wyhash;
+const rng2 = @import("math.zig").rng2;
 
 const chunk_pool = @import("chunk_pool.zig");
 const datastruct = @import("datastruct.zig");
@@ -156,8 +157,7 @@ pub fn signal(self: *View, blk: *Block) Signal {
     const mouse = self.mouse;
     const rect = blk.rect;
 
-    const in_bounds = rect[0][0] <= mouse[0] and mouse[0] < rect[1][0] and
-        rect[0][1] <= mouse[1] and mouse[1] < rect[1][1];
+    const in_bounds = rng2.contains(rect, mouse);
 
     var node = self.events.first;
 

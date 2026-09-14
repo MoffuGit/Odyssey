@@ -3,12 +3,13 @@
 
 const std = @import("std");
 const math = @import("../math.zig");
+const rng = math.rng;
 const linked_list = @import("linked_list.zig");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
 pub const MemMapRng = struct {
-    vaddr_range: math.Rngu64,
+    vaddr_range: [2]u64,
     base: [*]u8,
     next: ?*MemMapRng = null,
 };
@@ -16,27 +17,27 @@ pub const MemMapRng = struct {
 pub const MemMap = struct {
     ranges: linked_list.SinglyLinkedList(MemMapRng) = .empty,
 
-    pub fn push(self: *MemMap, vaddr_range: math.Rngu64, base: *anyopaque, alloc: Allocator) !void {
+    pub fn push(self: *MemMap, vaddr_range: [2]u64, base: *anyopaque, alloc: Allocator) !void {
         const range = try alloc.create(MemMapRng);
         range.* = .{ .base = @ptrCast(base), .vaddr_range = vaddr_range };
 
         self.ranges.append(range);
     }
 
-    pub fn read(self: *const MemMap, range: math.Rngu64, dest: []u8) u64 {
-        var dest_vaddr = range.min;
+    pub fn read(self: *const MemMap, range: [2]u64, dest: []u8) u64 {
+        var dest_vaddr = range[0];
         while (true) {
             var found = false;
             const start_vaddr = dest_vaddr;
             var node = self.ranges.head;
             while (node) |n| : (node = n.next) {
-                if (n.vaddr_range.contains(dest_vaddr)) {
-                    const src_off = dest_vaddr - n.vaddr_range.min;
-                    const possible = n.vaddr_range.max - dest_vaddr;
-                    const needed = range.max - dest_vaddr;
+                if (rng.contains(n.vaddr_range, dest_vaddr)) {
+                    const src_off = dest_vaddr - n.vaddr_range[0];
+                    const possible = n.vaddr_range[1] - dest_vaddr;
+                    const needed = range[1] - dest_vaddr;
                     const to_read = @min(needed, possible);
 
-                    const dest_off: usize = @intCast(dest_vaddr - range.min);
+                    const dest_off: usize = @intCast(dest_vaddr - range[0]);
                     const len: usize = @intCast(to_read);
                     const off: usize = @intCast(src_off);
                     @memcpy(dest[dest_off .. dest_off + len], n.base[off .. off + len]);
@@ -48,11 +49,11 @@ pub const MemMap = struct {
             if (!found or dest_vaddr == start_vaddr) break;
         }
 
-        return dest_vaddr - range.min;
+        return dest_vaddr - range[0];
     }
 
-    pub fn slice(self: *const MemMap, range: math.Rngu64, alloc: Allocator) ![]u8 {
-        const buffer = try alloc.alloc(u8, range.dim());
+    pub fn slice(self: *const MemMap, range: [2]u64, alloc: Allocator) ![]u8 {
+        const buffer = try alloc.alloc(u8, rng.dim(range));
         _ = self.read(range, buffer);
         return buffer;
     }
@@ -65,10 +66,10 @@ test "Memory Map Simple Test" {
     var map: MemMap = .{};
 
     var buffer: [16]u8 = .{5} ** 5 ++ .{0} ** 11;
-    try map.push(.{ .min = 0, .max = buffer.len }, &buffer, arena.allocator());
+    try map.push(.{ 0, buffer.len }, &buffer, arena.allocator());
 
     var new_buffer: [16]u8 = undefined;
-    const readed = map.read(.{ .min = 0, .max = buffer.len }, &new_buffer);
+    const readed = map.read(.{ 0, buffer.len }, &new_buffer);
     try testing.expectEqual(buffer.len, readed);
     try testing.expectEqual(buffer, new_buffer);
 }
@@ -80,9 +81,9 @@ test "Memory Map Simple Slice Test" {
     var map: MemMap = .{};
 
     var buffer: [16]u8 = .{5} ** 5 ++ .{0} ** 11;
-    try map.push(.{ .min = 0, .max = buffer.len }, &buffer, arena.allocator());
+    try map.push(.{ 0, buffer.len }, &buffer, arena.allocator());
 
-    const slice = try map.slice(.{ .min = 0, .max = buffer.len }, arena.allocator());
+    const slice = try map.slice(.{ 0, buffer.len }, arena.allocator());
 
     try testing.expectEqualStrings(&buffer, slice);
 }
@@ -97,12 +98,12 @@ test "Memory Map: small buffers read all at once" {
     var buf_a: [4]u8 = .{ 0x10, 0x11, 0x12, 0x13 };
     var buf_b: [4]u8 = .{ 0x20, 0x21, 0x22, 0x23 };
     var buf_c: [4]u8 = .{ 0x30, 0x31, 0x32, 0x33 };
-    try map.push(.{ .min = 0, .max = buf_a.len }, &buf_a, arena.allocator());
-    try map.push(.{ .min = 4, .max = 4 + buf_b.len }, &buf_b, arena.allocator());
-    try map.push(.{ .min = 8, .max = 8 + buf_c.len }, &buf_c, arena.allocator());
+    try map.push(.{ 0, buf_a.len }, &buf_a, arena.allocator());
+    try map.push(.{ 4, 4 + buf_b.len }, &buf_b, arena.allocator());
+    try map.push(.{ 8, 8 + buf_c.len }, &buf_c, arena.allocator());
 
     var dest: [12]u8 = undefined;
-    const readed = map.read(.{ .min = 0, .max = 12 }, &dest);
+    const readed = map.read(.{ 0, 12 }, &dest);
     try testing.expectEqual(12, readed);
 
     const expected: [12]u8 = .{
@@ -126,11 +127,11 @@ test "Memory Map: two medium buffers read into one chunk" {
     for (0..64) |i| buf_a[i] = @intCast(i);
     for (0..64) |i| buf_b[i] = @intCast(i + 64);
 
-    try map.push(.{ .min = 0, .max = buf_a.len }, &buf_a, arena.allocator());
-    try map.push(.{ .min = 64, .max = 64 + buf_b.len }, &buf_b, arena.allocator());
+    try map.push(.{ 0, buf_a.len }, &buf_a, arena.allocator());
+    try map.push(.{ 64, 64 + buf_b.len }, &buf_b, arena.allocator());
 
     var dest: [128]u8 = undefined;
-    const readed = map.read(.{ .min = 0, .max = 128 }, &dest);
+    const readed = map.read(.{ 0, 128 }, &dest);
     try testing.expectEqual(128, readed);
 
     for (0..128) |i| try testing.expectEqual(@as(u8, @intCast(i)), dest[i]);
@@ -147,15 +148,15 @@ test "Memory Map: two medium buffers read in smaller chunks" {
     for (0..64) |i| buf_a[i] = @intCast(i);
     for (0..64) |i| buf_b[i] = @intCast(i + 64);
 
-    try map.push(.{ .min = 0, .max = buf_a.len }, &buf_a, arena.allocator());
-    try map.push(.{ .min = 64, .max = 64 + buf_b.len }, &buf_b, arena.allocator());
+    try map.push(.{ 0, buf_a.len }, &buf_a, arena.allocator());
+    try map.push(.{ 64, 64 + buf_b.len }, &buf_b, arena.allocator());
 
     // Read in 32-byte chunks — some chunks straddle the two buffers.
     const chunk_size: u64 = 32;
     var offset: u64 = 0;
     while (offset < 128) : (offset += chunk_size) {
         var chunk: [32]u8 = undefined;
-        const readed = map.read(.{ .min = offset, .max = offset + chunk_size }, &chunk);
+        const readed = map.read(.{ offset, offset + chunk_size }, &chunk);
         try testing.expectEqual(chunk_size, readed);
 
         for (0..chunk_size) |i| {
@@ -174,11 +175,11 @@ test "Memory Map: overlapping ranges, first inserted takes priority" {
     // B covers 0-16 (second inserted, overlaps A in 0-8, extends to 16).
     var buf_a: [8]u8 = .{0xAA} ** 8;
     var buf_b: [16]u8 = .{0xBB} ** 16;
-    try map.push(.{ .min = 0, .max = buf_a.len }, &buf_a, arena.allocator());
-    try map.push(.{ .min = 0, .max = buf_b.len }, &buf_b, arena.allocator());
+    try map.push(.{ 0, buf_a.len }, &buf_a, arena.allocator());
+    try map.push(.{ 0, buf_b.len }, &buf_b, arena.allocator());
 
     var dest: [16]u8 = undefined;
-    const readed = map.read(.{ .min = 0, .max = 16 }, &dest);
+    const readed = map.read(.{ 0, 16 }, &dest);
     try testing.expectEqual(16, readed);
 
     // Overlap region 0-8 comes from A (priority), 8-16 comes from B.
@@ -195,11 +196,11 @@ test "Memory Map: gap stops the read at last valid byte" {
     // A covers 0-8, B covers 16-24. Gap from 8-16.
     var buf_a: [8]u8 = .{0xAA} ** 8;
     var buf_b: [8]u8 = .{0xBB} ** 8;
-    try map.push(.{ .min = 0, .max = buf_a.len }, &buf_a, arena.allocator());
-    try map.push(.{ .min = 16, .max = 16 + buf_b.len }, &buf_b, arena.allocator());
+    try map.push(.{ 0, buf_a.len }, &buf_a, arena.allocator());
+    try map.push(.{ 16, 16 + buf_b.len }, &buf_b, arena.allocator());
 
     var dest: [24]u8 = undefined;
-    const readed = map.read(.{ .min = 0, .max = 24 }, &dest);
+    const readed = map.read(.{ 0, 24 }, &dest);
     // Read stops at the gap — only 8 bytes read.
     try testing.expectEqual(8, readed);
 

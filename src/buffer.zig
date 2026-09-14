@@ -5,7 +5,7 @@ const patch = @import("patch.zig");
 const PatchList = patch.PatchList;
 
 const math = @import("math.zig");
-const Rngu64 = math.Rngu64;
+const rng = math.rng;
 
 pub const Buffer = @This();
 
@@ -25,7 +25,7 @@ pub fn init(self: *Buffer, data: []u8, alloc: Allocator) !void {
 
 pub const Info = struct {
     line_count: u64,
-    line_ranges: []Rngu64,
+    line_ranges: [][2]u64,
     line_max_size: u64,
 
     pub fn init(self: *Info, buffer: []u8, alloc: Allocator) !void {
@@ -35,17 +35,17 @@ pub const Info = struct {
             if (char == '\n' or cnt == buffer.len) count += 1;
         }
 
-        var ranges = try alloc.alloc(math.Rngu64, count);
+        var ranges = try alloc.alloc([2]u64, count);
 
         var line_idx: usize = 0;
         var max_size: u64 = 0;
         var start: u64 = 0;
         for (buffer, 1..) |c, idx| {
             if (c == '\n' or idx == buffer.len) {
-                const range: Rngu64 = .new(start, idx - 1);
+                const range: [2]u64 = .{ start, idx - 1 };
                 ranges[line_idx] = range;
 
-                max_size = @max(max_size, range.dim());
+                max_size = @max(max_size, rng.dim(range));
                 line_idx += 1;
                 start = idx;
             }
@@ -77,17 +77,17 @@ test "Buffer init test" {
 
     const buffer = try arena.dupe(u8, text);
 
-    const expected: [5]math.Rngu64 = .{
-        math.Rngu64{ .min = 0, .max = 31 },
-        math.Rngu64{ .min = 32, .max = 69 },
-        math.Rngu64{ .min = 70, .max = 106 },
-        math.Rngu64{ .min = 107, .max = 143 },
-        math.Rngu64{ .min = 144, .max = 144 },
+    const expected: [5][2]u64 = .{
+        .{ 0, 31 },
+        .{ 32, 69 },
+        .{ 70, 106 },
+        .{ 107, 143 },
+        .{ 144, 144 },
     };
 
     var info: Info = undefined;
     try info.init(buffer, arena);
 
-    try testing.expectEqualSlices(math.Rngu64, &expected, info.line_ranges);
+    try testing.expectEqualSlices([2]u64, &expected, info.line_ranges);
     try testing.expectEqual(info.line_max_size, 70 - 33);
 }
