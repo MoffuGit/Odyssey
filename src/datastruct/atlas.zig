@@ -142,13 +142,15 @@ pub fn reserve(self: *Atlas, width: u64, height: u64) !Region {
     }
 
     if (bottom.width > 0 and bottom.height > 0) {
-        const node = self.free.pop() orelse try self.arena.allocator().create(RegionNode);
+        const node = self.free.pop() orelse
+            try self.arena.allocator().create(RegionNode);
         node.* = .{ .region = bottom };
         self.regions.append(node);
     }
 
     if (right.width > 0 and right.height > 0) {
-        const node = self.free.pop() orelse try self.arena.allocator().create(RegionNode);
+        const node = self.free.pop() orelse
+            try self.arena.allocator().create(RegionNode);
         node.* = .{ .region = right };
         self.regions.append(node);
     }
