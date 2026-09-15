@@ -156,6 +156,19 @@ pub fn reserve(self: *Atlas, width: u64, height: u64) !Region {
     return region;
 }
 
+pub fn set(self: *Atlas, region: Region, data: []const u8) void {
+    var idx: u64 = 0;
+
+    while (idx < region.height) : (idx += 1) {
+        const tex_offset = ((region.y + idx) * self.width) + region.x;
+        const data_offset = idx * region.width;
+        @memmove(
+            self.buffer[tex_offset .. tex_offset + region.width],
+            data[data_offset .. data_offset + region.width],
+        );
+    }
+}
+
 pub fn deinit(self: *Atlas) void {
     self.arena.deinit();
 }
@@ -201,6 +214,37 @@ test "Basic Operations" {
     try testing.expect(atlas.free.is_empty());
 
     try testing.expectError(error.Full, atlas.reserve(100, 100));
+}
+
+test "set writes rows at the correct offsets" {
+    const gpa = testing.allocator;
+    var atlas: Atlas = undefined;
+    try atlas.init(80, 40, gpa);
+    defer atlas.deinit();
+
+    @memset(atlas.buffer, 0);
+
+    const region = try atlas.reserve(10, 3);
+    const data_len = region.width * region.height;
+    const data = "0123456789ABCDEFGHIJ0123456789";
+    atlas.set(region, data[0..data_len]);
+
+    var idx: u64 = 0;
+    while (idx < region.height) : (idx += 1) {
+        const tex_offset = (region.y + idx) * atlas.width + region.x;
+        const data_offset = idx * region.width;
+        try testing.expectEqualStrings(
+            data[data_offset .. data_offset + region.width],
+            atlas.buffer[tex_offset .. tex_offset + region.width],
+        );
+    }
+
+    var byte_idx: u64 = 0;
+    while (byte_idx < atlas.width * atlas.height) : (byte_idx += 1) {
+        const in_region = byte_idx >= region.y * atlas.width + region.x and
+            byte_idx < (region.y + region.height) * atlas.width + region.x;
+        if (!in_region) try testing.expect(atlas.buffer[byte_idx] == 0);
+    }
 }
 
 fn expectRegion(region: Region, x: u64, y: u64, width: u64, height: u64) !void {
