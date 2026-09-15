@@ -106,6 +106,7 @@ pub fn reserve(self: *Atlas, width: u64, height: u64) !Region {
     };
 
     self.regions.remove(best);
+    self.free.append(best);
 
     const free_region = best.region;
 
@@ -140,31 +141,16 @@ pub fn reserve(self: *Atlas, width: u64, height: u64) !Region {
         };
     }
 
-    const bottom_valid = bottom.width > 0 and bottom.height > 0;
-    const right_valid = right.width > 0 and right.height > 0;
-
-    const extra: ?*RegionNode = if (bottom_valid and right_valid)
-        self.free.pop() orelse try self.arena.allocator().create(RegionNode)
-    else
-        null;
-
-    var reused = false;
-
-    if (bottom_valid) {
-        best.region = bottom;
-        self.regions.append(best);
-        reused = true;
-    }
-
-    if (right_valid) {
-        const node = if (reused) extra.? else best;
-        node.* = .{ .region = right, .next = null, .prev = null };
+    if (bottom.width > 0 and bottom.height > 0) {
+        const node = self.free.pop() orelse try self.arena.allocator().create(RegionNode);
+        node.* = .{ .region = bottom };
         self.regions.append(node);
-        reused = true;
     }
 
-    if (!reused) {
-        self.free.append(best);
+    if (right.width > 0 and right.height > 0) {
+        const node = self.free.pop() orelse try self.arena.allocator().create(RegionNode);
+        node.* = .{ .region = right };
+        self.regions.append(node);
     }
 
     return region;
@@ -182,8 +168,8 @@ const Region = struct {
 };
 
 const RegionNode = struct {
-    next: ?*RegionNode,
-    prev: ?*RegionNode,
+    next: ?*RegionNode = null,
+    prev: ?*RegionNode = null,
 
     region: Region,
 };
