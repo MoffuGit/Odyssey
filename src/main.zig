@@ -33,7 +33,7 @@ pub fn logFileTerminal(
     t: std.Io.Terminal,
 ) std.Io.Writer.Error!void {
     t.setColor(.dim) catch {};
-    if (scope != .default) try t.writer.print("@{t}", .{scope});
+    if (scope != .default) try t.writer.print("@{t} ", .{scope});
     t.setColor(.reset) catch {};
 
     t.setColor(switch (level) {
@@ -46,6 +46,8 @@ pub fn logFileTerminal(
     try t.writer.writeAll("◍ ");
 
     t.setColor(.reset) catch {};
+
+    try t.writer.writeAll(".──  ");
 
     try t.writer.print(format ++ "\n", args);
 }
