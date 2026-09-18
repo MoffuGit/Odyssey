@@ -6,7 +6,10 @@ const assert = std.debug.assert;
 const Io = std.Io;
 const Duration = Io.Duration;
 const Timestamp = Io.Timestamp;
-const mode: enum { smoke, benchmark } =
+
+const log = std.log.scoped(.bench);
+
+pub const mode: enum { smoke, benchmark } =
     // See build.zig for how this is ultimately determined.
     if (@import("test_options").benchmark) .benchmark else .smoke;
 
@@ -122,6 +125,6 @@ fn asc(_: void, a: Duration, b: Duration) bool {
 pub fn report(comptime fmt: []const u8, args: anytype) void {
     switch (mode) {
         .smoke => {},
-        .benchmark => std.debug.print(fmt ++ "\n", args),
+        .benchmark => log.info(fmt, args),
     }
 }
