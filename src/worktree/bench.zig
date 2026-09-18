@@ -34,8 +34,6 @@ const WorktreeObserver = struct {
 test "benchmark: Worktree initial scan" {
     if (mode == .smoke) return;
 
-    std.testing.log_level = .info;
-
     try global.init();
     defer global.deinit();
 

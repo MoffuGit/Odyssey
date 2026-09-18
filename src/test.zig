@@ -17,6 +17,14 @@ const View = @import("view.zig");
 const Workspace = @import("workspace.zig");
 const Worktree = @import("worktree.zig");
 
+const std = @import("std");
+const log = @import("log.zig");
+
+pub const std_options: std.Options = .{
+    .logFn = log.logFn,
+    .log_level = .info,
+};
+
 test {
     _ = View;
     _ = render;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const debug = std.debug;
 
 pub fn logFn(
     comptime level: std.log.Level,
@@ -6,14 +7,14 @@ pub fn logFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    const io = std.Options.debug_io;
-    const prev = io.swapCancelProtection(.blocked);
-    defer _ = io.swapCancelProtection(prev);
     var buffer: [64]u8 = undefined;
-    const stderr = std.debug.lockStderr(&buffer).terminal();
-    defer std.debug.unlockStderr();
+    const stderr = debug.lockStderr(&buffer);
+    defer debug.unlockStderr();
 
-    return logFileTerminal(level, scope, format, args, stderr) catch {};
+    var terminal = stderr.terminal();
+    terminal.mode = .escape_codes;
+
+    return logFileTerminal(level, scope, format, args, terminal) catch {};
 }
 
 pub fn logFileTerminal(
@@ -38,7 +39,7 @@ pub fn logFileTerminal(
 
     t.setColor(.reset) catch {};
 
-    try t.writer.writeAll(".──  ");
+    try t.writer.writeAll(".──. ");
 
     try t.writer.print(format ++ "\n", args);
 }
