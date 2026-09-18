@@ -4,6 +4,7 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const posix = std.posix;
+const Bench = @import("bench.zig");
 
 const log = std.log.scoped(.global);
 
@@ -25,7 +26,9 @@ pub fn init() !void {
     const hostname = posix.gethostname(&hostname_buffer) catch "unknown";
 
     var buffer: [256]u8 = undefined;
-    const t = std.debug.lockStderr(&buffer).terminal();
+    var t = std.debug.lockStderr(&buffer).terminal();
+    t.mode = .escape_codes;
+
     defer std.debug.unlockStderr();
 
     t.writer.writeAll("\n") catch {};
@@ -38,8 +41,16 @@ pub fn init() !void {
     writeCol(&t);
     t.writer.writeAll("    ") catch {};
     t.setColor(.bold) catch {};
-    t.writer.print("ODYSSEY\n", .{}) catch {};
+    t.writer.print("ODYSSEY", .{}) catch {};
     t.setColor(.reset) catch {};
+
+    if (Bench.mode == .benchmark) {
+        t.setColor(.dim) catch {};
+        t.writer.print(" [Benchmark]", .{}) catch {};
+        t.setColor(.reset) catch {};
+    }
+
+    t.writer.print("\n", .{}) catch {};
 
     writeCol(&t);
     t.writer.writeAll("    ") catch {};
