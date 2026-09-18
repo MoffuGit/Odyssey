@@ -62,7 +62,7 @@ test "benchmark: Worktree initial scan" {
         try zlob_set.put(try arena.dupe(u8, e.relativePath()), {});
     }
 
-    Bench.report("Worktree Scanned Path={s}", .{chromium_path});
+    Bench.report("path={s}", .{chromium_path});
     var durations: [8]Io.Duration = undefined;
 
     for (0..durations.len) |idx| {
