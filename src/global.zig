@@ -54,9 +54,7 @@ pub fn init() !void {
 
     writeCol(&t);
     t.writer.writeAll("    ") catch {};
-    t.setColor(.dim) catch {};
     t.writer.print("{s}\n", .{hostname}) catch {};
-    t.setColor(.reset) catch {};
 
     writeCol(&t);
     t.writer.writeAll("    ") catch {};
