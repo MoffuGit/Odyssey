@@ -1,4 +1,4 @@
-const bench = @import("bench.zig");
+const Bench = @import("bench.zig");
 const Buffer = @import("buffer.zig");
 const chunk_pool = @import("chunk_pool.zig");
 const chunked_path = @import("chunked_path.zig");
@@ -21,7 +21,7 @@ test {
     _ = view;
     _ = render;
     _ = Scheduler;
-    _ = bench;
+    _ = Bench;
     _ = patch;
     _ = Buffer;
     _ = Core;
