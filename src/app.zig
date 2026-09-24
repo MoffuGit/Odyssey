@@ -195,7 +195,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         view.pushAttr(.{ .height = .grow });
 
         view.background(.{ 1.0, 0.0, 0.0, 1.0 });
-        view.spacer(.{ .fixed = 100 });
+        view.spacer(.{ .fixed = 100 }, 0.0);
 
         const green = green: {
             view.shrink(1.0);
@@ -206,34 +206,30 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             view.pushAttr(.{ .parent = green });
             defer view.popAttr(.parent);
 
-            view.shrink(1.0);
-            view.spacer(.grow);
+            view.spacer(.grow, 1.0);
 
             {
                 view.col();
-                view.width(.{ .fixed = 100 });
+                view.width(.{ .fixed = 100.0 });
 
                 const col = view.block(.{});
 
                 view.pushAttr(.{ .parent = col });
                 defer view.popAttr(.parent);
 
-                view.shrink(1.0);
-                view.spacer(.grow);
+                view.spacer(.grow, 1.0);
 
                 view.rounded(12.0);
                 view.background(.{ 1.0, 0.647, 0.0, 1.0 });
                 view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
-                view.height(.{ .fixed = 100 });
+                view.height(.{ .fixed = 100.0 });
 
                 if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
 
-                view.shrink(1.0);
-                view.spacer(.grow);
+                view.spacer(.grow, 1.0);
             }
 
-            view.shrink(1.0);
-            view.spacer(.grow);
+            view.spacer(.grow, 1.0);
 
             break :green green;
         };
@@ -242,7 +238,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         if (green_signal.hovered) green.color = .{ 0.0, 1.0, 0.5, 1.0 };
 
         view.background(.{ 0.0, 0.0, 1.0, 1.0 });
-        view.spacer(.{ .fixed = 100 });
+        view.spacer(.{ .fixed = 100.0 }, 0.0);
     }
 
     const frame = window_state.handle.nextFrame();

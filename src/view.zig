@@ -407,7 +407,7 @@ pub fn row(self: *View) void {
     self.nextAttr(.{ .axis = .x });
 }
 
-pub fn spacer(self: *View, sizing: Sizing) void {
+pub fn spacer(self: *View, sizing: Sizing, per: f32) void {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
@@ -415,6 +415,8 @@ pub fn spacer(self: *View, sizing: Sizing) void {
         .x => self.width(sizing),
         .y => self.height(sizing),
     }
+
+    self.shrink(per);
 
     _ = self.block(.{});
 }
