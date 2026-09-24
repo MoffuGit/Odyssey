@@ -191,9 +191,6 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         try view.begin(window_state.win, resize);
         defer view.finish();
 
-        view.pushAttr(.{ .width = .grow });
-        view.pushAttr(.{ .height = .grow });
-
         view.background(.{ 1.0, 0.0, 0.0, 1.0 });
         view.spacer(.{ .fixed = 100 }, 0.0);
 
@@ -201,33 +198,27 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             view.shrink(1.0);
             view.background(.{ 0.0, 1.0, 0.0, 1.0 });
 
-            const green = view.blockStr("@@@green", .{ .mouse = true });
-
-            view.pushAttr(.{ .parent = green });
-            defer view.popAttr(.parent);
+            const green = view.blkStr("@@@green", .{ .mouse = true });
+            defer view.endBlk();
 
             view.spacer(.grow, 1.0);
             defer view.spacer(.grow, 1.0);
 
-            {
-                view.col();
-                view.width(.{ .fixed = 100.0 });
+            view.col();
+            view.width(.{ .fixed = 100.0 });
 
-                const col = view.block(.{});
+            _ = view.blk(.{});
+            defer view.endBlk();
 
-                view.pushAttr(.{ .parent = col });
-                defer view.popAttr(.parent);
+            view.spacer(.grow, 1.0);
+            defer view.spacer(.grow, 1.0);
 
-                view.spacer(.grow, 1.0);
-                defer view.spacer(.grow, 1.0);
+            view.rounded(12.0);
+            view.background(.{ 1.0, 0.647, 0.0, 1.0 });
+            view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
+            view.height(.{ .fixed = 100.0 });
 
-                view.rounded(12.0);
-                view.background(.{ 1.0, 0.647, 0.0, 1.0 });
-                view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
-                view.height(.{ .fixed = 100.0 });
-
-                if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
-            }
+            if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
 
             break :green green;
         };
