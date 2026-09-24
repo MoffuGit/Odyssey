@@ -197,21 +197,17 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         const green = green: {
             view.shrink(1.0);
             view.background(.{ 0.0, 1.0, 0.0, 1.0 });
+            view.padding(.grow, 1.0);
 
             const green = view.blkStr("@@@green", .{ .mouse = true });
-            defer view.endBlk();
-
-            view.spacer(.grow, 1.0);
-            defer view.spacer(.grow, 1.0);
+            defer view.blkEnd();
 
             view.col();
+            view.padding(.grow, 1.0);
             view.width(.{ .fixed = 100.0 });
 
             _ = view.blk(.{});
-            defer view.endBlk();
-
-            view.spacer(.grow, 1.0);
-            defer view.spacer(.grow, 1.0);
+            defer view.blkEnd();
 
             view.rounded(12.0);
             view.background(.{ 1.0, 0.647, 0.0, 1.0 });

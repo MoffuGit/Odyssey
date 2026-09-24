@@ -307,8 +307,35 @@ pub fn blk(self: *View, options: Options) *Block {
     return block;
 }
 
-pub fn endBlk(self: *View) void {
+pub fn blkEnd(self: *View) void {
+    const block = self.stacks.get(.parent).head.?.value;
+    if (block.flags.padding) {
+        const value = self.stacks.get(.padding).head.?.value;
+        self.spacer(value.@"0", value.@"1");
+
+        self.popAttr(.padding);
+    }
+
     self.popAttr(.parent);
+}
+
+fn blkComplete(self: *View, block: *Block) void {
+    inline for (@typeInfo(Stacks.Tag).@"enum".fields) |field| {
+        const flag = @as(u64, 1) << field.value;
+        if (self.pop_flags & flag != 0) {
+            self.pop_flags &= ~flag;
+            if (self.stacks.pop(@enumFromInt(field.value)) == null) unreachable;
+        }
+    }
+
+    self.pushAttr(.{ .parent = block });
+
+    if (block.flags.padding) {
+        const value = self.stacks.get(.padding).head.?.value;
+        self.spacer(value.@"0", value.@"1");
+    }
+
+    self.block_count += 1;
 }
 
 pub fn pushAttr(self: *View, attr: Attribute) void {
@@ -338,6 +365,8 @@ pub fn popAttrs(self: *View, comptime fields: []const StackField) void {
 }
 
 pub fn nextAttr(self: *View, attr: Attribute) void {
+    assert(attr != .padding);
+
     self.pushAttr(attr);
     self.flagStack(meta.activeTag(attr));
 }
@@ -354,17 +383,9 @@ fn flagStack(self: *View, field: StackField) void {
     self.pop_flags |= stackFlag(field);
 }
 
-fn blkComplete(self: *View, block: *Block) void {
-    inline for (@typeInfo(Stacks.Tag).@"enum".fields) |field| {
-        const flag = @as(u64, 1) << field.value;
-        if (self.pop_flags & flag != 0) {
-            self.pop_flags &= ~flag;
-            if (self.stacks.pop(@enumFromInt(field.value)) == null) unreachable;
-        }
-    }
-
-    self.pushAttr(.{ .parent = block });
-    self.block_count += 1;
+pub fn padding(self: *View, sizing: Sizing, per: f32) void {
+    self.pushAttr(.{ .padding = .{ sizing, per } });
+    self.nextFlag().padding = true;
 }
 
 pub fn shrink(self: *View, per: f32) void {
@@ -429,12 +450,12 @@ pub fn spacer(self: *View, sizing: Sizing, per: f32) void {
     self.shrink(per);
 
     _ = self.blk(.{});
-    self.endBlk();
+    self.blkEnd();
 }
 
 pub fn button(self: *View, str: []const u8) Signal {
     const block = self.blkStr(str, .{ .mouse = true });
-    self.endBlk();
+    self.blkEnd();
 
     return self.signal(block);
 }
@@ -457,6 +478,7 @@ const Stacks = TaggedLinkedList(union(enum) {
     radius: [4]f32,
     border: [4]f32,
     thickness: f32,
+    padding: struct { Sizing, f32 },
 });
 
 pub const Attribute = Stacks.Value;
@@ -530,15 +552,14 @@ pub const Block = struct {
     bounds: [2]f32,
 
     pub const Flags = packed struct {
-        pub const allowOverflow: Flags = .{ .overflow = 0b11 };
-
         overflow: u2 = 0,
         mouse: bool = false,
         background: bool = false,
         border: bool = false,
+        padding: bool = false,
     };
 
-    const FlagBits = u5;
+    const FlagBits = u6;
 
     pub const empty: Block = .{
         .rect = @splat(@splat(0.0)),
@@ -581,12 +602,12 @@ pub const Block = struct {
         self.flags = @bitCast(@as(FlagBits, @bitCast(flags)) | stack_flags);
 
         if (self.flags.background) {
-            if (view.stacks.get(.background).head) |node| self.color = node.value;
+            self.color = view.stacks.get(.background).head.?.value;
         }
 
         if (self.flags.border) {
-            if (view.stacks.get(.border).head) |node| self.border = node.value;
-            if (view.stacks.get(.thickness).head) |node| self.thickness = node.value;
+            self.border = view.stacks.get(.border).head.?.value;
+            self.thickness = view.stacks.get(.thickness).head.?.value;
         }
 
         self.touched_frame = view.frame;
