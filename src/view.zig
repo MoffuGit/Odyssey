@@ -304,8 +304,6 @@ pub fn blk(self: *View, options: Options) *Block {
 
     block.build(self, options.flags);
 
-    self.pushAttr(.{ .parent = block });
-
     return block;
 }
 
@@ -356,7 +354,7 @@ fn flagStack(self: *View, field: StackField) void {
     self.pop_flags |= stackFlag(field);
 }
 
-fn blockCompleted(self: *View) void {
+fn blkComplete(self: *View, block: *Block) void {
     inline for (@typeInfo(Stacks.Tag).@"enum".fields) |field| {
         const flag = @as(u64, 1) << field.value;
         if (self.pop_flags & flag != 0) {
@@ -365,6 +363,7 @@ fn blockCompleted(self: *View) void {
         }
     }
 
+    self.pushAttr(.{ .parent = block });
     self.block_count += 1;
 }
 
@@ -592,7 +591,7 @@ pub const Block = struct {
 
         self.touched_frame = view.frame;
 
-        view.blockCompleted();
+        view.blkComplete(self);
     }
 
     pub fn reset(self: *Block) void {
