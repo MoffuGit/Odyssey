@@ -86,7 +86,7 @@ pub fn deinit(self: *View) void {
 }
 
 pub fn begin(self: *View, window: Window, resize: bool) !void {
-    const size = try window.size();
+    const window_size = try window.size();
     const mouse = try window.mouse();
 
     self.root = null;
@@ -102,13 +102,13 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
         self.mouse = .{ mouse.x, mouse.y };
     }
 
-    self.width(.{ .fixed = size.w });
-    self.height(.{ .fixed = size.h });
+    self.width(.{ .fixed = window_size.w });
+    self.height(.{ .fixed = window_size.h });
 
     self.root = self.blk(.{});
 
-    self.pushAttr(.{ .width = .grow });
-    self.pushAttr(.{ .height = .grow });
+    self.pushAttr(.{ .width = .fit });
+    self.pushAttr(.{ .height = .fit });
 }
 
 pub fn finish(self: *View) void {
@@ -402,6 +402,11 @@ pub fn shrink(self: *View, per: f32) void {
 
 pub fn rounded(self: *View, radius: f32) void {
     self.nextAttr(.{ .radius = @splat(radius) });
+}
+
+pub fn size(self: *View, sizing: Sizing) void {
+    self.width(sizing);
+    self.height(sizing);
 }
 
 pub fn width(self: *View, sizing: Sizing) void {
@@ -725,9 +730,10 @@ pub const Block = struct {
             {
                 var children = current.children.first;
                 while (children) |child| : (children = child.next) {
-                    const size = child.size[axis];
-                    const overflow = size - allowed;
-                    const fix = clamp(overflow, 0, size);
+                    const child_size = child.size[axis];
+
+                    const overflow = child_size - allowed;
+                    const fix = clamp(overflow, 0, child_size);
                     if (fix > 0) child.size[axis] -= fix;
                 }
             }
