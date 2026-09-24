@@ -224,9 +224,7 @@ pub fn blkStr(self: *View, str: []const u8, flags: Block.Flags) *Block {
         if (std.mem.find(u8, str, "@@@")) |index| {
             const chunk = str[index + "@@@".len ..];
 
-            if (chunk.len == 0) {
-                break :key null;
-            } else {
+            if (chunk.len == 0) break :key null else {
                 var node = self.stacks.get(.parent).head;
                 while (node) |current| : (node = current.next) {
                     if (current.value.key) |parent_key| {
