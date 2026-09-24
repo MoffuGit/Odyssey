@@ -304,6 +304,8 @@ pub fn blk(self: *View, options: Options) *Block {
 
     block.build(self, options.flags);
 
+    self.blkComplete(block);
+
     return block;
 }
 
@@ -611,8 +613,6 @@ pub const Block = struct {
         }
 
         self.touched_frame = view.frame;
-
-        view.blkComplete(self);
     }
 
     pub fn reset(self: *Block) void {
