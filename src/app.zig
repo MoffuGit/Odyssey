@@ -207,6 +207,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
             defer view.popAttr(.parent);
 
             view.spacer(.grow, 1.0);
+            defer view.spacer(.grow, 1.0);
 
             {
                 view.col();
@@ -218,6 +219,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 defer view.popAttr(.parent);
 
                 view.spacer(.grow, 1.0);
+                defer view.spacer(.grow, 1.0);
 
                 view.rounded(12.0);
                 view.background(.{ 1.0, 0.647, 0.0, 1.0 });
@@ -225,11 +227,7 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
                 view.height(.{ .fixed = 100.0 });
 
                 if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
-
-                view.spacer(.grow, 1.0);
             }
-
-            view.spacer(.grow, 1.0);
 
             break :green green;
         };
