@@ -271,5 +271,5 @@ pub fn renderFrame(app: *App, ws: *WindowState, resize: bool) !void {
         }
     }
 
-    render.renderFrame(&app.renderer, &ws.handle, frame, resize);
+    render.render(&app.renderer, &ws.handle, frame, resize);
 }
