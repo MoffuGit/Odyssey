@@ -385,18 +385,18 @@ fn flagStack(self: *View, field: StackField) void {
     self.pop_flags |= stackFlag(field);
 }
 
-pub fn padding(self: *View, sizing: Sizing, per: f32) void {
-    self.pushAttr(.{ .padding = .{ sizing, per } });
+pub fn padding(self: *View, sizing: Sizing, factor: f32) void {
+    self.pushAttr(.{ .padding = .{ sizing, factor } });
     self.nextFlag().padding = true;
 }
 
-pub fn shrink(self: *View, per: f32) void {
+pub fn shrink(self: *View, factor: f32) void {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
     switch (axis) {
-        .x => self.nextAttr(.{ .width_shrink = per }),
-        .y => self.nextAttr(.{ .height_shrink = per }),
+        .x => self.nextAttr(.{ .width_shrink = factor }),
+        .y => self.nextAttr(.{ .height_shrink = factor }),
     }
 }
 
@@ -445,7 +445,7 @@ pub fn row(self: *View) void {
     self.nextAttr(.{ .axis = .x });
 }
 
-pub fn spacer(self: *View, sizing: Sizing, per: f32) void {
+pub fn spacer(self: *View, sizing: Sizing, factor: f32) void {
     const parent = self.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
@@ -454,7 +454,7 @@ pub fn spacer(self: *View, sizing: Sizing, per: f32) void {
         .y => self.height(sizing),
     }
 
-    self.shrink(per);
+    self.shrink(factor);
 
     _ = self.blk(.{});
     self.blkEnd();
@@ -806,3 +806,5 @@ pub const Block = struct {
         }
     }
 };
+
+pub fn name() !void {}
