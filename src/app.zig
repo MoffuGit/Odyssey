@@ -181,53 +181,48 @@ pub fn openWindow(self: *App, opts: win.Options) !void {
     self.states.append(window_state);
 }
 
-pub fn buildView(
-    ws: *WindowState,
-    resize: bool,
-) !void {
-    const view = &ws.view;
-
-    try view.begin(ws.win, resize);
-    defer view.finish();
-
-    view.background(.{ 1.0, 0.0, 0.0, 1.0 });
-    view.height(.grow);
-    view.spacer(.{ .fixed = 100 }, 0.0);
-
-    const green = green: {
-        view.shrink(1.0);
-        view.background(.{ 0.0, 1.0, 0.0, 1.0 });
-        view.padding(.grow, 1.0);
-
-        const green = view.blkStr("@@@green", .{ .mouse = true });
-        defer view.blkEnd();
-
-        view.col();
-        view.padding(.grow, 1.0);
-
-        _ = view.blk(.{});
-        defer view.blkEnd();
-
-        view.size(.{ .fixed = 100.0 });
-        view.rounded(12.0);
-        view.background(.{ 1.0, 0.647, 0.0, 1.0 });
-        view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
-
-        if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
-
-        break :green green;
-    };
-    const green_signal = view.signal(green);
-
-    if (green_signal.hovered) green.color = .{ 0.0, 1.0, 0.5, 1.0 };
-
-    view.background(.{ 0.0, 0.0, 1.0, 1.0 });
-    view.height(.grow);
-    view.spacer(.{ .fixed = 100.0 }, 0.0);
-}
-
 pub fn renderFrame(app: *App, ws: *WindowState, resize: bool) !void {
-    try buildView(ws, resize);
+    {
+        const view = &ws.view;
+
+        try view.begin(ws.win, resize);
+        defer view.finish();
+
+        view.background(.{ 1.0, 0.0, 0.0, 1.0 });
+        view.height(.grow);
+        view.spacer(.{ .fixed = 100 }, 0.0);
+
+        const green = green: {
+            view.shrink(1.0);
+            view.background(.{ 0.0, 1.0, 0.0, 1.0 });
+            view.padding(.grow, 1.0);
+
+            const green = view.blkStr("@@@green", .{ .mouse = true });
+            defer view.blkEnd();
+
+            view.col();
+            view.padding(.grow, 1.0);
+
+            _ = view.blk(.{});
+            defer view.blkEnd();
+
+            view.size(.{ .fixed = 100.0 });
+            view.rounded(12.0);
+            view.background(.{ 1.0, 0.647, 0.0, 1.0 });
+            view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
+
+            if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
+
+            break :green green;
+        };
+        const green_signal = view.signal(green);
+
+        if (green_signal.hovered) green.color = .{ 0.0, 1.0, 0.5, 1.0 };
+
+        view.background(.{ 0.0, 0.0, 1.0, 1.0 });
+        view.height(.grow);
+        view.spacer(.{ .fixed = 100.0 }, 0.0);
+    }
 
     const frame = ws.handle.nextFrame();
     errdefer ws.handle.releaseFrame();
