@@ -125,14 +125,14 @@ fn resizeCallback(event: win.Event) void {
         if (state.win.raw == window.raw) {
             resized = state;
         } else {
-            self.renderFrame(state, false) catch |err| {
+            self.renderWindow(state, false) catch |err| {
                 log.err("Frame render err={}", .{err});
             };
         }
     }
 
     if (resized) |state| {
-        self.renderFrame(state, true) catch |err| {
+        self.renderWindow(state, true) catch |err| {
             log.err("Frame render err={}", .{err});
         };
     }
@@ -162,7 +162,7 @@ fn displayCallback(display: *Display) bool {
                     else => {},
                 }
             }
-            self.renderFrame(state, false) catch |err| {
+            self.renderWindow(state, false) catch |err| {
                 log.debug("Frame render err={}", .{err});
             };
 
@@ -181,7 +181,7 @@ pub fn openWindow(self: *App, opts: win.Options) !void {
     self.states.append(window_state);
 }
 
-pub fn renderFrame(app: *App, ws: *WindowState, resize: bool) !void {
+pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
     {
         const view = &ws.view;
 
@@ -224,52 +224,54 @@ pub fn renderFrame(app: *App, ws: *WindowState, resize: bool) !void {
         view.spacer(.{ .fixed = 100.0 }, 0.0);
     }
 
-    const frame = ws.handle.nextFrame();
-    errdefer ws.handle.releaseFrame();
+    {
+        const frame = ws.handle.nextFrame();
+        errdefer ws.handle.releaseFrame();
 
-    const size = try ws.win.size();
+        const size = try ws.win.size();
 
-    frame.uniforms = .{ .viewport_size = .{ size.w, size.h } };
+        frame.uniforms = .{ .viewport_size = .{ size.w, size.h } };
 
-    var node = ws.view.root;
-    while (node) |box| : (node = box.nextPre()) {
-        var rect = box.rect[0] ++ box.rect[1];
+        var node = ws.view.root;
+        while (node) |box| : (node = box.nextPre()) {
+            var rect = box.rect[0] ++ box.rect[1];
 
-        if (box.flags.border) {
-            const thickness = box.thickness;
-            var radius = box.radius;
-            for (0..radius.len) |idx| {
-                radius[idx] += thickness;
+            if (box.flags.border) {
+                const thickness = box.thickness;
+                var radius = box.radius;
+                for (0..radius.len) |idx| {
+                    radius[idx] += thickness;
+                }
+
+                try frame.rect(&app.renderer, .{
+                    .position = rect,
+                    .color_0 = box.border,
+                    .color_1 = box.border,
+                    .color_2 = box.border,
+                    .color_3 = box.border,
+                    .corner_rads = radius,
+                    .border = thickness,
+                });
+
+                rect[0] += thickness;
+                rect[1] += thickness;
+                rect[2] -= thickness;
+                rect[3] -= thickness;
             }
 
-            try frame.rect(&app.renderer, .{
-                .position = rect,
-                .color_0 = box.border,
-                .color_1 = box.border,
-                .color_2 = box.border,
-                .color_3 = box.border,
-                .corner_rads = radius,
-                .border = thickness,
-            });
-
-            rect[0] += thickness;
-            rect[1] += thickness;
-            rect[2] -= thickness;
-            rect[3] -= thickness;
+            if (box.flags.background) {
+                try frame.rect(&app.renderer, .{
+                    .position = rect,
+                    .color_0 = box.color,
+                    .color_1 = box.color,
+                    .color_2 = box.color,
+                    .color_3 = box.color,
+                    .corner_rads = box.radius,
+                    .border = 0.0,
+                });
+            }
         }
 
-        if (box.flags.background) {
-            try frame.rect(&app.renderer, .{
-                .position = rect,
-                .color_0 = box.color,
-                .color_1 = box.color,
-                .color_2 = box.color,
-                .color_3 = box.color,
-                .corner_rads = box.radius,
-                .border = 0.0,
-            });
-        }
+        render.render(&app.renderer, &ws.handle, frame, resize);
     }
-
-    render.render(&app.renderer, &ws.handle, frame, resize);
 }
