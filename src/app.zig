@@ -232,7 +232,7 @@ pub fn renderFrame(app: *App, ws: *WindowState, resize: bool) !void {
     frame.uniforms = .{ .viewport_size = .{ size.w, size.h } };
 
     var node = ws.view.root;
-    while (node) |box| : (node = box.nextPreOrder()) {
+    while (node) |box| : (node = box.nextPre()) {
         var rect = box.rect[0] ++ box.rect[1];
 
         if (box.flags.border) {

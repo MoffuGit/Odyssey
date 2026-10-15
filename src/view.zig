@@ -634,7 +634,7 @@ pub const Block = struct {
         self.flags = .{};
     }
 
-    pub fn nextPreOrder(self: *Block) ?*Block {
+    pub fn nextPre(self: *Block) ?*Block {
         if (self.children.first) |child| return child;
 
         var ancestor = self;
@@ -644,15 +644,15 @@ pub const Block = struct {
         }
     }
 
-    pub fn firstPostOrder(self: *Block) *Block {
+    pub fn firstPost(self: *Block) *Block {
         var block = self;
         while (block.children.first) |child| block = child;
         return block;
     }
 
-    pub fn nextPostOrder(self: *Block) ?*Block {
+    pub fn nextPost(self: *Block) ?*Block {
         const parent = self.parent orelse return null;
-        return if (self.next) |sibling| sibling.firstPostOrder() else parent;
+        return if (self.next) |sibling| sibling.firstPost() else parent;
     }
 
     pub fn layout(self: *Block, axis: u1) void {
@@ -665,7 +665,7 @@ pub const Block = struct {
 
     pub fn resolveFixedSizing(self: *Block, axis: u1) void {
         var block: ?*Block = self;
-        while (block) |current| : (block = current.nextPreOrder()) {
+        while (block) |current| : (block = current.nextPre()) {
             switch (current.sizing[axis]) {
                 .fixed => |fixed| current.size[axis] = fixed,
                 else => {},
@@ -675,7 +675,7 @@ pub const Block = struct {
 
     pub fn resolvePerSizing(self: *Block, axis: u1) void {
         var block: ?*Block = self;
-        while (block) |current| : (block = current.nextPreOrder()) {
+        while (block) |current| : (block = current.nextPre()) {
             switch (current.sizing[axis]) {
                 .percent => |percent| {
                     const parent_size = parent_size: {
@@ -698,8 +698,8 @@ pub const Block = struct {
     }
 
     pub fn resolveFitSizing(self: *Block, axis: u1) void {
-        var block: ?*Block = self.firstPostOrder();
-        while (block) |current| : (block = current.nextPostOrder()) {
+        var block: ?*Block = self.firstPost();
+        while (block) |current| : (block = current.nextPost()) {
             switch (current.sizing[axis]) {
                 .fit => {
                     var total: f32 = 0.0;
@@ -721,7 +721,7 @@ pub const Block = struct {
 
     pub fn resolveOverflow(self: *Block, axis: u1) void {
         var block: ?*Block = self;
-        while (block) |current| : (block = current.nextPreOrder()) {
+        while (block) |current| : (block = current.nextPre()) {
             const allowed = current.size[axis];
             const overflow_mask = @as(u2, 1) << axis;
 
@@ -779,7 +779,7 @@ pub const Block = struct {
 
     pub fn resolveRect(self: *Block, axis: u1) void {
         var block: ?*Block = self;
-        while (block) |current| : (block = current.nextPreOrder()) {
+        while (block) |current| : (block = current.nextPre()) {
             var position: f32 = 0.0;
             var bounds: f32 = 0.0;
 
