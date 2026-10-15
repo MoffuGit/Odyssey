@@ -1,6 +1,71 @@
 //Source: https://github.com/ghostty-org/ghostty/blob/main/src/tripwire.zig
 //License: [licenses/GHOSTTY_MIT]
 
+//! A library for injecting failures into Zig code for the express
+//! purpose of testing error handling paths.
+//!
+//! Improper `errdefer` is one of the highest sources of bugs in Zig code.
+//! Many `errdefer` points are hard to exercise in unit tests and rare
+//! to encounter in production, so they often hide bugs. Worse, error
+//! scenarios are most likely to put your code in an unexpected state
+//! that can result in future assertion failures or memory safety issues.
+//!
+//! This module aims to solve this problem by providing a way to inject
+//! errors at specific points in your code during unit tests, allowing you
+//! to test every possible error path.
+//!
+//! # Usage
+//!
+//! To use this package, create a `tripwire.module` for each failable
+//! function you want to test. The enum must be hand-curated to be the
+//! set of fail points, and the error set comes directly from the function
+//! itself.
+//!
+//! Pepper your function with `try tw.check` calls wherever you want to
+//! have a testable failure point. You don't need every "try" to have
+//! an associated tripwire check, only the ones you care about testing.
+//! Usually, this is going to be the points where you want to test
+//! errdefer logic above it.
+//!
+//! In unit tests, add `try tw.errorAlways` or related calls to
+//! configure expected failures. Then, call your function. Finally, always
+//! call `try tw.end(.reset)` to verify your expectations were met and
+//! to reset the tripwire module for future tests.
+//!
+//! ```
+//! const tw = tripwire.module(enum { alloc_buf, open_file }, myFunction);
+//!
+//! fn myFunction() tw.Error!void {
+//!     try tw.check(.alloc_buf);
+//!     const buf = try allocator.alloc(u8, 1024);
+//!     errdefer allocator.free(buf);
+//!
+//!     try tw.check(.open_file);
+//!     const file = try std.Io.Dir.cwd().openFile(io, "foo.txt", .{});
+//!     // ...
+//! }
+//!
+//! test "myFunction fails on alloc" {
+//!     tw.errorAlways(.alloc_buf, error.OutOfMemory);
+//!     try std.testing.expectError(error.OutOfMemory, myFunction());
+//!     try tw.end(.reset);
+//! }
+//! ```
+//!
+//! ## Transitive Function Calls
+//!
+//! To test transitive calls, there are two schools of thought:
+//!
+//!   1. Put a failure point above the transitive call in the caller
+//!      and assume the child function error handling works correctly.
+//!
+//!   2. Create another tripwire module for the child function and
+//!      trigger failures there. This is recommended if the child function
+//!      can't really be called in isolation (e.g. its an auxiliary function
+//!      to a public API).
+//!
+//! Either works, its situationally dependent which is better.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
