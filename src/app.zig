@@ -141,9 +141,6 @@ fn resizeCallback(event: win.Event) void {
 fn displayCallback(display: *Display) bool {
     const self: *App = @fieldParentPtr("display", display);
 
-    self.renderer.start();
-    defer self.renderer.end();
-
     if (self.states.is_empty()) self.core.stop();
 
     win.pollEvents();
@@ -184,11 +181,11 @@ pub fn openWindow(self: *App, opts: win.Options) !void {
     self.states.append(window_state);
 }
 
-pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
+pub fn renderFrame(app: *App, ws: *WindowState, resize: bool) !void {
     {
-        const view = &window_state.view;
+        const view = &ws.view;
 
-        try view.begin(window_state.win, resize);
+        try view.begin(ws.win, resize);
         defer view.finish();
 
         view.background(.{ 1.0, 0.0, 0.0, 1.0 });
@@ -227,14 +224,14 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         view.spacer(.{ .fixed = 100.0 }, 0.0);
     }
 
-    const frame = window_state.handle.nextFrame();
-    errdefer window_state.handle.releaseFrame();
+    const frame = ws.handle.nextFrame();
+    errdefer ws.handle.releaseFrame();
 
-    const size = try window_state.win.size();
+    const size = try ws.win.size();
 
     frame.uniforms = .{ .viewport_size = .{ size.w, size.h } };
 
-    var node = window_state.view.root;
+    var node = ws.view.root;
     while (node) |box| : (node = box.nextPreOrder()) {
         var rect = box.rect[0] ++ box.rect[1];
 
@@ -274,5 +271,5 @@ pub fn renderFrame(app: *App, window_state: *WindowState, resize: bool) !void {
         }
     }
 
-    render.renderFrame(&app.renderer, &window_state.handle, frame, resize);
+    render.renderFrame(&app.renderer, &ws.handle, frame, resize);
 }
