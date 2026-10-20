@@ -81,7 +81,9 @@ pub fn RUNINF() !void {
     stderr.writer.writeAll("\n") catch {};
 
     for (0..40) |_| {
+        stderr.setColor(.dim) catch {};
         stderr.writer.print("-", .{}) catch {};
+        stderr.setColor(.reset) catch {};
     }
 
     stderr.writer.writeAll("\n") catch {};
