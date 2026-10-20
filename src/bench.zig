@@ -3,10 +3,11 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
-const log = @import("log.zig");
 const Io = std.Io;
 const Duration = Io.Duration;
 const Timestamp = Io.Timestamp;
+
+const log = @import("log.zig");
 
 pub const mode: enum { smoke, benchmark } =
     // See build.zig for how this is ultimately determined.
@@ -52,6 +53,8 @@ seed: u64,
 timestamp: ?Timestamp,
 
 pub fn init() Bench {
+    if (mode == .benchmark) log.banner() catch {};
+
     return .{
         // Benchmarks require a fixed seed for reproducibility; smoke mode uses a random seed.
         .seed = if (mode == .benchmark) seed_benchmark else std.testing.random_seed,
