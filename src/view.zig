@@ -806,5 +806,3 @@ pub const Block = struct {
         }
     }
 };
-
-pub fn name() !void {}
