@@ -124,6 +124,6 @@ fn asc(_: void, a: Duration, b: Duration) bool {
 pub fn report(comptime fmt: []const u8, args: anytype) void {
     switch (mode) {
         .smoke => {},
-        .benchmark => log.logFn(.info, .bench, fmt, args),
+        .benchmark => log.logFn(.err, .bench, fmt, args),
     }
 }
