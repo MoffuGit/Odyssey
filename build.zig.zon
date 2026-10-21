@@ -34,10 +34,6 @@
     .dependencies = .{
         .macos = .{ .path = "./zig-pkg/macos" },
         .apple_sdk = .{ .path = "./zig-pkg/apple-sdk" },
-        .zqlite = .{
-            .url = "git+https://github.com/karlseguin/zqlite.zig?ref=master#5ac4cabe95a6d7faa7baf0da8057a8e6e8a227a1",
-            .hash = "zqlite-0.0.1-RWLaY64xnAAxsD2YNT8QqPMJUuaFv2GOzFRR4aGypJv3",
-        },
         .zig_objc = .{
             .url = "git+https://github.com/mitchellh/zig-objc.git?ref=main#c8de82ff80281215ad92900866dab7103a8efa8b",
             .hash = "zig_objc-0.0.0-Ir_Sp9gsAQCPAJc0oF5xoWePHWP6Y6tCphDeyNUThJoi",

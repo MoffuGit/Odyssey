@@ -54,11 +54,6 @@ fn rootModule(
     optimize: std.builtin.OptimizeMode,
     root_source: []const u8,
 ) *std.Build.Module {
-    const zqlite = b.dependency("zqlite", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     const objc = b.dependency("zig_objc", .{
         .target = target,
         .optimize = optimize,
@@ -92,7 +87,6 @@ fn rootModule(
                 .target = target,
                 .optimize = optimize,
             }).module("zlob_core") },
-            .{ .name = "zqlite", .module = zqlite.module("zqlite") },
             .{ .name = "objc", .module = objc.module("objc") },
             .{ .name = "c", .module = c_mod },
             .{ .name = "macos", .module = macos.module("macos") },
@@ -103,13 +97,6 @@ fn rootModule(
     mod.linkFramework("CoreVideo", .{});
     mod.linkFramework("IOKit", .{});
     mod.linkFramework("Metal", .{});
-
-    const default_sqlite3_build = [_][]const u8{"-std=c99"};
-
-    mod.addCSourceFile(.{
-        .file = b.path("lib/sqlite3.c"),
-        .flags = &default_sqlite3_build,
-    });
 
     addTestOptions(mod, b);
 
