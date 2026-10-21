@@ -181,12 +181,12 @@ pub const Window = window: {
             _ = self;
         }
 
-        pub fn size(_: *const @This()) !struct { w: f32, h: f32 } {
-            return .{ .w = 600, .h = 800 };
+        pub fn size(_: *const @This()) ![2]f32 {
+            return .{ 600, 800 };
         }
 
-        pub fn mouse(_: *const @This()) !struct { x: f32, y: f32 } {
-            return .{ .x = 0, .y = 0 };
+        pub fn mouse(_: *const @This()) ![2]f32 {
+            return .{ 0, 0 };
         }
     };
 };
