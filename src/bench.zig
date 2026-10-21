@@ -53,8 +53,6 @@ seed: u64,
 timestamp: ?Timestamp,
 
 pub fn init() Bench {
-    if (mode == .benchmark) log.RUNINF() catch {};
-
     return .{
         // Benchmarks require a fixed seed for reproducibility; smoke mode uses a random seed.
         .seed = if (mode == .benchmark) seed_benchmark else std.testing.random_seed,

@@ -11,8 +11,6 @@ pub const std_options: std.Options = .{
 };
 
 pub fn main(init: std.process.Init) !void {
-    log.RUNINF() catch {};
-
     try global.init();
     defer global.deinit();
 

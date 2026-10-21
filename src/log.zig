@@ -49,34 +49,3 @@ pub fn logFileTerminal(
 
     try t.writer.print(format ++ "\n", args);
 }
-
-pub fn RUNINF() !void {
-    var buffer: [256]u8 = undefined;
-    var stderr = std.debug.lockStderr(&buffer).terminal();
-    defer std.debug.unlockStderr();
-
-    stderr.mode = .escape_codes;
-
-    stderr.writer.writeAll("\n") catch {};
-
-    stderr.setColor(.bold) catch {};
-    stderr.writer.print("ODYSSEY", .{}) catch {};
-    stderr.setColor(.reset) catch {};
-
-    stderr.setColor(.dim) catch {};
-
-    if (Bench.mode == .benchmark) {
-        stderr.writer.print(" [Benchmark]", .{}) catch {};
-    }
-
-    stderr.writer.print(" -- ", .{}) catch {};
-
-    stderr.writer.print("@{s} ", .{@tagName(builtin.mode)}) catch {};
-    stderr.setColor(.reset) catch {};
-
-    stderr.setColor(.yellow) catch {};
-    stderr.writer.print("{f} ", .{builtin.zig_version}) catch {};
-    stderr.setColor(.reset) catch {};
-
-    stderr.writer.writeAll("\n\n") catch {};
-}
