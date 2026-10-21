@@ -228,9 +228,9 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
         const frame = ws.handle.nextFrame();
         errdefer ws.handle.releaseFrame();
 
-        const size = try ws.win.size();
-
-        frame.uniforms = .{ .viewport_size = .{ size.w, size.h } };
+        frame.uniforms = .{
+            .viewport_size = try ws.win.size(),
+        };
 
         var node = ws.view.root;
         while (node) |box| : (node = box.nextPre()) {

@@ -87,7 +87,6 @@ pub fn deinit(self: *View) void {
 
 pub fn begin(self: *View, window: Window, resize: bool) !void {
     const window_size = try window.size();
-    const mouse = try window.mouse();
 
     self.root = null;
     self.stacks = .empty;
@@ -99,11 +98,11 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
     if (resize) {
         self.mouse = .{ -1.0, -1.0 };
     } else {
-        self.mouse = .{ mouse.x, mouse.y };
+        self.mouse = try window.mouse();
     }
 
-    self.width(.{ .fixed = window_size.w });
-    self.height(.{ .fixed = window_size.h });
+    self.width(.{ .fixed = window_size[0] });
+    self.height(.{ .fixed = window_size[1] });
 
     self.root = self.blk(.{});
 

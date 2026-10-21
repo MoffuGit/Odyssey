@@ -142,12 +142,12 @@ pub const Window = window: {
             return c.RGFW_window_getView_OSX(self.ptr);
         }
 
-        pub fn size(self: *const @This()) !struct { w: f32, h: f32 } {
+        pub fn size(self: *const @This()) ![2]f32 {
             var w: i32 = 0;
             var h: i32 = 0;
 
             if (c.RGFW_window_getSize(self.ptr, &w, &h) == c.RGFW_TRUE) {
-                return .{ .w = @floatFromInt(w), .h = @floatFromInt(h) };
+                return .{ @floatFromInt(w), @floatFromInt(h) };
             } else {
                 return error.GetSizeError;
             }
@@ -159,12 +159,12 @@ pub const Window = window: {
             return .{ .ptr = ptr };
         }
 
-        pub fn mouse(self: *const @This()) !struct { x: f32, y: f32 } {
+        pub fn mouse(self: *const @This()) ![2]f32 {
             var x: i32 = 0;
             var y: i32 = 0;
 
             if (c.RGFW_window_getMouse(self.ptr, &x, &y) == c.RGFW_TRUE) {
-                return .{ .x = @floatFromInt(x), .y = @floatFromInt(y) };
+                return .{ @floatFromInt(x), @floatFromInt(y) };
             } else {
                 return error.GetMouseError;
             }
