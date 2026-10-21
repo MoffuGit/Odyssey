@@ -7,6 +7,7 @@ const heap = std.heap;
 const assert = std.debug.assert;
 const testing = std.testing;
 const Io = std.Io;
+const PAGE_SIZE = heap.page_size_min;
 const builtin = @import("builtin");
 
 const c = @import("c");
@@ -17,11 +18,10 @@ const chunk_pool = @import("chunk_pool.zig");
 const ChunkPool = chunk_pool.ChunkPool;
 const datastruct = @import("datastruct.zig");
 const SinglyLinkedList = datastruct.SinglyLinkedList;
-const Metal = @import("renderer/metal.zig");
+const Metal = @import("render/metal.zig");
 const win = @import("window.zig");
 const Window = win.Window;
 
-const PAGE_SIZE = heap.page_size_min;
 const RECT_CAPACITY = PAGE_SIZE / std.math.gcd(PAGE_SIZE, @sizeOf(Rect));
 
 const log = std.log.scoped(.render);
@@ -30,24 +30,20 @@ pub const Renderer = renderer: {
     if (!builtin.is_test) break :renderer Metal;
 
     break :renderer struct {
+        pub const Handle = struct {
+            pub fn init(_: *Handle, _: *const Renderer, _: *Window, _: Allocator, _: Io) !void {}
+
+            pub fn deinit(_: *Handle) void {}
+        };
+
         pub fn init(_: *Renderer) !void {}
 
         pub fn deinit(_: *Renderer) void {}
     };
 };
 
-pub const Handle = renderer: {
-    if (!builtin.is_test) break :renderer Metal.Handle;
-
-    break :renderer struct {
-        pub fn init(_: *Handle, _: *const Renderer, _: *Window, _: Allocator, _: Io) !void {}
-
-        pub fn deinit(_: *Handle) void {}
-    };
-};
-
 //The sync path i take it from this issue: https://github.com/ocornut/imgui/issues/9500
-pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sync: bool) void {
+pub fn render(renderer: *Renderer, handle: *Renderer.Handle, frame_state: *FrameState, sync: bool) void {
     renderer.start();
     defer renderer.end();
 

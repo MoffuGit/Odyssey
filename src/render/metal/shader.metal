@@ -62,7 +62,7 @@ fragment float4 rectFragmentShader(RectOutput in [[stage_in]]) {
     float border_sdf_t = 1.0f;
     if(in.border > 0.0f) {
         float border_sdf_s = rect_sdf(in.sdf_pos, in.half_size - float2(2.0f, 2.0f) - in.border, max(in.radius - in.border, 0.0f));
-        border_sdf_t = smoothstep(0, 2.0f, in.border);
+        border_sdf_t = smoothstep(0, 2.0f, border_sdf_s);
     }
 
     if(border_sdf_t < 0.001f) {

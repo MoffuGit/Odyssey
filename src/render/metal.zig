@@ -1,4 +1,4 @@
-//! LICENSE: [GHOSTTY]
+// LICENSE: [GHOSTTY]
 
 const std = @import("std");
 const Io = std.Io;
@@ -14,10 +14,23 @@ const FrameState = render.FrameState;
 const win = @import("../window.zig");
 const Window = win.Window;
 const c = @import("metal/c.zig");
-const sh = @import("metal/shaders.zig");
-const Shaders = sh.Shaders;
 
-const SwapChain = datastruct.SwapChain(FrameState, 3);
+const BufferCount = 3;
+
+const pipeline_descs: []const struct { [:0]const u8, PipelineDescription } =
+    &.{
+        .{
+            "rect",
+            .{
+                .vertex_fn = "rectVertexShader",
+                .fragment_fn = "rectFragmentShader",
+                .blending_enabled = true,
+                .step_fn = .per_instance,
+                .vertex_attributes = render.Rect,
+            },
+        },
+    };
+
 const log = std.log.scoped(.metal);
 
 pub const Metal = @This();
@@ -57,6 +70,13 @@ pub fn init(self: *Metal) !void {
     try self.shaders.init(self.device, .bgra8unorm);
 }
 
+pub fn deinit(self: *Metal) void {
+    if (self.autorelease_pool) |pool| pool.deinit();
+    self.shaders.deinit();
+    self.queue.release();
+    self.device.release();
+}
+
 pub fn buffer(
     self: *Metal,
     chunk: [*]u8,
@@ -64,13 +84,6 @@ pub fn buffer(
     resource_options: c.MTLResourceOptions,
 ) Buffer {
     return .init(self.device, chunk, len, resource_options);
-}
-
-pub fn deinit(self: *Metal) void {
-    if (self.autorelease_pool) |pool| pool.deinit();
-    self.shaders.deinit();
-    self.queue.release();
-    self.device.release();
 }
 
 pub fn start(self: *Metal) void {
@@ -432,6 +445,40 @@ pub const RenderPass = struct {
     }
 };
 
+pub const SwapChain = struct {
+    io: Io,
+    buffer: [BufferCount]FrameState,
+    index: std.math.IntFittingRange(0, BufferCount) = 0,
+    semaphore: std.Io.Semaphore = .{ .permits = BufferCount },
+
+    pub fn init(self: *@This(), gpa: Allocator, io: Io) !void {
+        self.* = .{
+            .io = io,
+            .buffer = undefined,
+        };
+
+        for (&self.buffer) |*frame_state| {
+            try frame_state.init(gpa);
+        }
+    }
+
+    pub fn deinit(self: *@This()) void {
+        for (0..BufferCount) |_| self.semaphore.waitUncancelable(self.io);
+        for (&self.buffer) |*frame_state| frame_state.deinit();
+    }
+
+    pub fn nextFrame(self: *@This()) *FrameState {
+        self.semaphore.waitUncancelable(self.io);
+        errdefer self.semaphore.post();
+        self.index = (self.index + 1) % BufferCount;
+        return &self.buffer[self.index];
+    }
+
+    pub fn releaseFrame(self: *@This()) void {
+        self.semaphore.post(self.io);
+    }
+};
+
 pub const Pipeline = struct {
     /// Options for initializing a render pipeline.
     pub const Options = struct {
@@ -615,15 +662,132 @@ pub const Pipeline = struct {
             attr.setProperty("bufferIndex", @as(c_ulong, 0));
         }
     }
+};
 
-    fn checkError(err_: ?*anyopaque) !void {
-        const nserr = objc.Object.fromId(err_ orelse return);
-        const str = @as(
-            *macos.foundation.String,
-            @ptrCast(nserr.getProperty(?*anyopaque, "localizedDescription").?),
-        );
+/// All the comptime-known info about a pipeline, so that
+/// we can define them ahead-of-time in an ergonomic way.
+const PipelineDescription = struct {
+    vertex_attributes: ?type = null,
+    vertex_fn: []const u8,
+    fragment_fn: []const u8,
+    step_fn: c.MTLVertexStepFunction = .per_vertex,
+    blending_enabled: bool,
 
-        log.err("metal error={s}", .{str.cstringPtr(.ascii).?});
-        return error.MetalFailed;
+    fn initPipeline(
+        self: PipelineDescription,
+        device: objc.Object,
+        library: objc.Object,
+        pixel_format: c.MTLPixelFormat,
+    ) !Pipeline {
+        return try .init(self.vertex_attributes, .{
+            .device = device,
+            .vertex_fn = self.vertex_fn,
+            .fragment_fn = self.fragment_fn,
+            .vertex_library = library,
+            .fragment_library = library,
+            .step_fn = self.step_fn,
+            .attachments = &.{.{
+                .pixel_format = pixel_format,
+                .blending_enabled = self.blending_enabled,
+            }},
+        });
     }
 };
+
+/// We create a type for the pipeline collection based on our desc array.
+const PipelineCollection = t: {
+    const StructField = std.builtin.Type.StructField;
+
+    var names: [pipeline_descs.len][]const u8 = undefined;
+    var types = [_]type{Pipeline} ** pipeline_descs.len;
+    var attrs = [_]StructField.Attributes{.{ .@"align" = @alignOf(Pipeline) }} ** pipeline_descs.len;
+
+    for (pipeline_descs, &names) |pipeline, *name| {
+        name.* = pipeline[0];
+    }
+    break :t @Struct(.auto, null, &names, &types, &attrs);
+};
+
+/// This contains the state for the shaders used by the Metal renderer.
+pub const Shaders = struct {
+    library: objc.Object,
+
+    /// Collection of available render pipelines.
+    pipelines: PipelineCollection,
+
+    /// Initialize our shader set.
+    pub fn init(
+        self: *Shaders,
+        device: objc.Object,
+        pixel_format: c.MTLPixelFormat,
+    ) !void {
+        const library = try initLibrary(device);
+        errdefer library.msgSend(void, objc.sel("release"), .{});
+
+        var pipelines: PipelineCollection = undefined;
+
+        var initialized_pipelines: usize = 0;
+
+        errdefer inline for (pipeline_descs, 0..) |pipeline, i| {
+            if (i < initialized_pipelines) {
+                @field(pipelines, pipeline[0]).deinit();
+            }
+        };
+
+        inline for (pipeline_descs) |pipeline| {
+            @field(pipelines, pipeline[0]) = try pipeline[1].initPipeline(
+                device,
+                library,
+                pixel_format,
+            );
+            initialized_pipelines += 1;
+        }
+
+        self.* = .{
+            .library = library,
+            .pipelines = pipelines,
+        };
+    }
+
+    pub fn deinit(self: *Shaders) void {
+        // Release our primary shaders
+        inline for (pipeline_descs) |pipeline| {
+            @field(self.pipelines, pipeline[0]).deinit();
+        }
+        self.library.msgSend(void, objc.sel("release"), .{});
+    }
+
+    /// Initialize the MTLLibrary. A MTLLibrary is a collection of shaders.
+    fn initLibrary(device: objc.Object) !objc.Object {
+        const data = try macos.dispatch.Data.create(
+            @embedFile("odyssey_metallib"),
+            macos.dispatch.queue.getMain(),
+            macos.dispatch.Data.DESTRUCTOR_DEFAULT,
+        );
+        defer data.release();
+
+        var err: ?*anyopaque = null;
+        const library = device.msgSend(
+            objc.Object,
+            objc.sel("newLibraryWithData:error:"),
+            .{
+                data,
+                &err,
+            },
+        );
+        try checkError(err);
+
+        return library;
+    }
+};
+
+fn checkError(err_: ?*anyopaque) !void {
+    const nserr = objc.Object.fromId(err_ orelse return);
+    const str = @as(
+        *macos.foundation.String,
+        @ptrCast(nserr.getProperty(?*anyopaque, "localizedDescription").?),
+    );
+
+    log.err("metal error={s}", .{str.cstringPtr(.ascii).?});
+    return error.MetalFailed;
+}

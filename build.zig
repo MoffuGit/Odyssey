@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) void {
 
     const metallib = MetallibStep.create(b, .{
         .name = "Odyssey",
-        .sources = &.{b.path("src/renderer/metal/shader.metal")},
+        .sources = &.{b.path("src/render/metal/shader.metal")},
     });
 
     root_module.addAnonymousImport("odyssey_metallib", .{
