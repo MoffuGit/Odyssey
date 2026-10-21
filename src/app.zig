@@ -122,7 +122,7 @@ fn resizeCallback(event: win.Event) void {
     var resized: ?*WindowState = null;
 
     while (curr) |state| : (curr = state.next) {
-        if (state.win.raw == window.raw) {
+        if (state.win.ptr == window.ptr) {
             resized = state;
         } else {
             self.renderWindow(state, false) catch |err| {

@@ -72,19 +72,34 @@ pub const Options = struct {
     flags: Flags,
 };
 
+pub const Monitor = monitor: {
+    break :monitor struct {
+        ptr: ?*c.struct_RGFW_monitor,
+
+        pub fn scale(self: *@This()) [2]f32 {
+            var x: f32 = 0;
+            var y: f32 = 0;
+
+            _ = c.RGFW_monitor_getScale(self.ptr, &x, &y);
+
+            return .{ x, y };
+        }
+    };
+};
+
 pub const Window = window: {
     if (!builtin.is_test) break :window struct {
-        raw: ?*c.struct_RGFW_window,
+        ptr: ?*c.struct_RGFW_window,
 
         pub fn init(
             self: *@This(),
             opts: Options,
         ) !void {
             self.* = .{
-                .raw = undefined,
+                .ptr = undefined,
             };
 
-            self.raw = c.RGFW_createWindow(
+            self.ptr = c.RGFW_createWindow(
                 opts.name,
                 opts.x,
                 opts.y,
@@ -95,54 +110,60 @@ pub const Window = window: {
         }
 
         pub fn deinit(self: *const @This()) void {
-            c.RGFW_window_close(self.raw);
+            c.RGFW_window_close(self.ptr);
         }
 
         pub fn setUserdata(self: *const @This(), ud: ?*anyopaque) void {
-            c.RGFW_window_setUserPtr(self.raw, ud);
+            c.RGFW_window_setUserPtr(self.ptr, ud);
         }
 
         pub fn userdata(self: *const @This()) ?*anyopaque {
-            return c.RGFW_window_getUserPtr(self.raw);
+            return c.RGFW_window_getUserPtr(self.ptr);
         }
 
         pub fn popEvent(self: *const @This()) ?Event {
-            var raw: c.RGFW_event = undefined;
-            if (c.RGFW_window_checkQueuedEvent(self.raw, &raw) == c.RGFW_TRUE) {
-                return Event.convert(raw);
+            var ptr: c.RGFW_event = undefined;
+            if (c.RGFW_window_checkQueuedEvent(self.ptr, &ptr) == c.RGFW_TRUE) {
+                return Event.convert(ptr);
             } else {
                 return null;
             }
         }
 
         pub fn shouldClose(self: *const @This()) bool {
-            return c.RGFW_window_shouldClose(self.raw) == c.RGFW_TRUE;
+            return c.RGFW_window_shouldClose(self.ptr) == c.RGFW_TRUE;
         }
 
         pub fn osWindow(self: *const @This()) ?*anyopaque {
-            return c.RGFW_window_getWindow_OSX(self.raw);
+            return c.RGFW_window_getWindow_OSX(self.ptr);
         }
 
         pub fn osView(self: *const @This()) ?*anyopaque {
-            return c.RGFW_window_getView_OSX(self.raw);
+            return c.RGFW_window_getView_OSX(self.ptr);
         }
 
         pub fn size(self: *const @This()) !struct { w: f32, h: f32 } {
             var w: i32 = 0;
             var h: i32 = 0;
 
-            if (c.RGFW_window_getSize(self.raw, &w, &h) == c.RGFW_TRUE) {
+            if (c.RGFW_window_getSize(self.ptr, &w, &h) == c.RGFW_TRUE) {
                 return .{ .w = @floatFromInt(w), .h = @floatFromInt(h) };
             } else {
                 return error.GetSizeError;
             }
         }
 
+        pub fn monitor(self: *const @This()) !Monitor {
+            const ptr = c.RGFW_window_getMonitor(self.ptr);
+
+            return .{ .ptr = ptr };
+        }
+
         pub fn mouse(self: *const @This()) !struct { x: f32, y: f32 } {
             var x: i32 = 0;
             var y: i32 = 0;
 
-            if (c.RGFW_window_getMouse(self.raw, &x, &y) == c.RGFW_TRUE) {
+            if (c.RGFW_window_getMouse(self.ptr, &x, &y) == c.RGFW_TRUE) {
                 return .{ .x = @floatFromInt(x), .y = @floatFromInt(y) };
             } else {
                 return error.GetMouseError;
@@ -223,54 +244,54 @@ pub const Event = struct {
     win: Window,
     type: EventType,
 
-    pub fn convert(raw: c.RGFW_event) Event {
+    pub fn convert(ptr: c.RGFW_event) Event {
         return .{
-            .win = .{ .raw = raw.common.win },
-            .type = switch (@as(EventKind, @enumFromInt(raw.type))) {
+            .win = .{ .ptr = ptr.common.win },
+            .type = switch (@as(EventKind, @enumFromInt(ptr.type))) {
                 .none => .none,
                 .window_focus_in => .focus_in,
                 .window_focus_out => .focus_out,
-                .key_char => .{ .key_char = raw.keyChar.value },
+                .key_char => .{ .key_char = ptr.keyChar.value },
                 .key_released, .key_pressed => .{
                     .key = .{
-                        .type = @enumFromInt(raw.type),
+                        .type = @enumFromInt(ptr.type),
                         .modifiers = .{
-                            .caps_lock = activeMod(raw.key.mod, c.RGFW_modCapsLock),
-                            .num_lock = activeMod(raw.key.mod, c.RGFW_modNumLock),
-                            .control = activeMod(raw.key.mod, c.RGFW_modControl),
-                            .alt = activeMod(raw.key.mod, c.RGFW_modAlt),
-                            .shift = activeMod(raw.key.mod, c.RGFW_modShift),
-                            .super = activeMod(raw.key.mod, c.RGFW_modSuper),
-                            .scroll_lock = activeMod(raw.key.mod, c.RGFW_modScrollLock),
+                            .caps_lock = activeMod(ptr.key.mod, c.RGFW_modCapsLock),
+                            .num_lock = activeMod(ptr.key.mod, c.RGFW_modNumLock),
+                            .control = activeMod(ptr.key.mod, c.RGFW_modControl),
+                            .alt = activeMod(ptr.key.mod, c.RGFW_modAlt),
+                            .shift = activeMod(ptr.key.mod, c.RGFW_modShift),
+                            .super = activeMod(ptr.key.mod, c.RGFW_modSuper),
+                            .scroll_lock = activeMod(ptr.key.mod, c.RGFW_modScrollLock),
                         },
-                        .value = raw.key.value,
-                        .repeat = raw.key.repeat == c.RGFW_TRUE,
+                        .value = ptr.key.value,
+                        .repeat = ptr.key.repeat == c.RGFW_TRUE,
                     },
                 },
                 .mouse_raw_motion => .{
                     .mouse_motion = .{
-                        .inside = raw.mouse.inWindow == c.RGFW_TRUE,
-                        .x = raw.delta.x,
-                        .y = raw.delta.y,
-                        .type = @enumFromInt(raw.type),
+                        .inside = ptr.mouse.inWindow == c.RGFW_TRUE,
+                        .x = ptr.delta.x,
+                        .y = ptr.delta.y,
+                        .type = @enumFromInt(ptr.type),
                     },
                 },
                 .mouse_motion, .mouse_enter, .mouse_leave => .{
                     .mouse_motion = .{
-                        .inside = raw.mouse.inWindow == c.RGFW_TRUE,
-                        .x = @floatFromInt(raw.mouse.x),
-                        .y = @floatFromInt(raw.mouse.y),
-                        .type = @enumFromInt(raw.type),
+                        .inside = ptr.mouse.inWindow == c.RGFW_TRUE,
+                        .x = @floatFromInt(ptr.mouse.x),
+                        .y = @floatFromInt(ptr.mouse.y),
+                        .type = @enumFromInt(ptr.type),
                     },
                 },
                 .mouse_button_released, .mouse_button_pressed => .{
                     .mouse_button = .{
-                        .button = @enumFromInt(raw.button.value),
-                        .type = @enumFromInt(raw.type),
+                        .button = @enumFromInt(ptr.button.value),
+                        .type = @enumFromInt(ptr.type),
                     },
                 },
                 .mouse_scroll => .{
-                    .mouse_scroll = .{ .x = raw.delta.x, .y = raw.delta.y },
+                    .mouse_scroll = .{ .x = ptr.delta.x, .y = ptr.delta.y },
                 },
                 .window_moved,
                 .window_resized,
@@ -281,11 +302,11 @@ pub const Event = struct {
                 .window_restored,
                 => .{
                     .window_update = .{
-                        .x = @floatFromInt(raw.update.x),
-                        .y = @floatFromInt(raw.update.y),
-                        .width = @floatFromInt(raw.update.w),
-                        .height = @floatFromInt(raw.update.h),
-                        .type = @enumFromInt(raw.type),
+                        .x = @floatFromInt(ptr.update.x),
+                        .y = @floatFromInt(ptr.update.y),
+                        .width = @floatFromInt(ptr.update.w),
+                        .height = @floatFromInt(ptr.update.h),
+                        .type = @enumFromInt(ptr.type),
                     },
                 },
                 .data_drop => .data_drop,
