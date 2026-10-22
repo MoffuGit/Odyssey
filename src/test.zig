@@ -15,6 +15,7 @@ const Scheduler = @import("scheduler.zig");
 const subscription = @import("subscription.zig");
 const View = @import("view.zig");
 const Worktree = @import("worktree.zig");
+const font = @import("font.zig");
 
 pub const std_options: std.Options = .{
     .logFn = log.logFn,
@@ -22,6 +23,7 @@ pub const std_options: std.Options = .{
 };
 
 test {
+    _ = font;
     _ = View;
     _ = render;
     _ = Scheduler;

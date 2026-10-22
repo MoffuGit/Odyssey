@@ -48,6 +48,26 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 }
 
+fn buildRgfw(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Module {
+    const translate_c = b.addTranslateC(.{
+        .optimize = optimize,
+        .target = target,
+        .root_source_file = b.path("lib/RGFW.h"),
+    });
+
+    const rgfw = translate_c.createModule();
+
+    rgfw.addCSourceFile(.{
+        .file = b.path("lib/RGFW.c"),
+    });
+
+    return rgfw;
+}
+
 fn rootModule(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -59,22 +79,17 @@ fn rootModule(
         .optimize = optimize,
     });
 
-    const translate_c = b.addTranslateC(.{
-        .optimize = optimize,
+    const zlob = b.dependency("zlob", .{
         .target = target,
-        .root_source_file = b.path("lib/RGFW.h"),
-    });
-
-    const c_mod = translate_c.createModule();
-
-    c_mod.addCSourceFile(.{
-        .file = b.path("lib/RGFW.c"),
+        .optimize = optimize,
     });
 
     const macos = b.dependency("macos", .{
         .target = target,
         .optimize = optimize,
     });
+
+    const rgfw = buildRgfw(b, target, optimize);
 
     const mod = b.createModule(.{
         .root_source_file = b.path(root_source),
@@ -83,13 +98,10 @@ fn rootModule(
         .link_libc = true,
         .sanitize_c = .off,
         .imports = &.{
-            .{ .name = "zlob", .module = b.dependency("zlob", .{
-                .target = target,
-                .optimize = optimize,
-            }).module("zlob_core") },
+            .{ .name = "zlob", .module = zlob.module("zlob_core") },
             .{ .name = "objc", .module = objc.module("objc") },
-            .{ .name = "c", .module = c_mod },
             .{ .name = "macos", .module = macos.module("macos") },
+            .{ .name = "rgfw", .module = rgfw },
         },
     });
 
