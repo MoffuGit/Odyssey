@@ -255,15 +255,7 @@ pub const Event = struct {
                 .key_released, .key_pressed => .{
                     .key = .{
                         .type = @enumFromInt(ptr.type),
-                        .modifiers = .{
-                            .caps_lock = activeMod(ptr.key.mod, rgfw.RGFW_modCapsLock),
-                            .num_lock = activeMod(ptr.key.mod, rgfw.RGFW_modNumLock),
-                            .control = activeMod(ptr.key.mod, rgfw.RGFW_modControl),
-                            .alt = activeMod(ptr.key.mod, rgfw.RGFW_modAlt),
-                            .shift = activeMod(ptr.key.mod, rgfw.RGFW_modShift),
-                            .super = activeMod(ptr.key.mod, rgfw.RGFW_modSuper),
-                            .scroll_lock = activeMod(ptr.key.mod, rgfw.RGFW_modScrollLock),
-                        },
+                        .modifiers = ptr.key.mod,
                         .value = ptr.key.value,
                         .repeat = ptr.key.repeat == rgfw.RGFW_TRUE,
                     },
@@ -378,16 +370,16 @@ pub const Key = struct {
         released = rgfw.RGFW_keyReleased,
     },
     value: u16,
-    modifiers: Modifiers,
+    modifiers: u32,
     repeat: bool,
 };
 
-pub const Modifiers = packed struct {
-    caps_lock: bool = false,
-    num_lock: bool = false,
-    control: bool = false,
-    alt: bool = false,
-    shift: bool = false,
-    super: bool = false,
-    scroll_lock: bool = false,
+pub const MODS = struct {
+    pub const CAPS_LOCK: u32 = rgfw.RGFW_modCapsLock;
+    pub const NUM_LOCK: u32 = rgfw.RGFW_modNumLock;
+    pub const CONTROL: u32 = rgfw.RGFW_modControl;
+    pub const ALT: u32 = rgfw.RGFW_modAlt;
+    pub const SHIFT: u32 = rgfw.RGFW_modShift;
+    pub const SUPER: u32 = rgfw.RGFW_modSuper;
+    pub const SCROLL_LOCK: u32 = rgfw.RGFW_modScrollLock;
 };
