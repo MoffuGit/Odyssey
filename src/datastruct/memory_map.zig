@@ -65,7 +65,7 @@ test "Memory Map Simple Test" {
 
     var map: MemMap = .{};
 
-    var buffer: [16]u8 = .{5} ** 5 ++ .{0} ** 11;
+    var buffer: [16]u8 = @as([5]u8, @splat(5)) ++ @as([11]u8, @splat(11));
     try map.push(.{ 0, buffer.len }, &buffer, arena.allocator());
 
     var new_buffer: [16]u8 = undefined;
@@ -80,7 +80,7 @@ test "Memory Map Simple Slice Test" {
 
     var map: MemMap = .{};
 
-    var buffer: [16]u8 = .{5} ** 5 ++ .{0} ** 11;
+    var buffer: [16]u8 = @as([5]u8, @splat(5)) ++ @as([11]u8, @splat(11));
     try map.push(.{ 0, buffer.len }, &buffer, arena.allocator());
 
     const slice = try map.slice(.{ 0, buffer.len }, arena.allocator());
@@ -173,8 +173,8 @@ test "Memory Map: overlapping ranges, first inserted takes priority" {
 
     // A covers 0-8 (first inserted, takes priority in the overlap).
     // B covers 0-16 (second inserted, overlaps A in 0-8, extends to 16).
-    var buf_a: [8]u8 = .{0xAA} ** 8;
-    var buf_b: [16]u8 = .{0xBB} ** 16;
+    var buf_a: [8]u8 = @splat(0xAA);
+    var buf_b: [16]u8 = @splat(0xBB);
     try map.push(.{ 0, buf_a.len }, &buf_a, arena.allocator());
     try map.push(.{ 0, buf_b.len }, &buf_b, arena.allocator());
 
@@ -194,8 +194,8 @@ test "Memory Map: gap stops the read at last valid byte" {
     var map: MemMap = .{};
 
     // A covers 0-8, B covers 16-24. Gap from 8-16.
-    var buf_a: [8]u8 = .{0xAA} ** 8;
-    var buf_b: [8]u8 = .{0xBB} ** 8;
+    var buf_a: [8]u8 = @splat(0xAA);
+    var buf_b: [16]u8 = @splat(0xBB);
     try map.push(.{ 0, buf_a.len }, &buf_a, arena.allocator());
     try map.push(.{ 16, 16 + buf_b.len }, &buf_b, arena.allocator());
 

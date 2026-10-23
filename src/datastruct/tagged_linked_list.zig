@@ -3,52 +3,55 @@ const testing = std.testing;
 
 const SinglyLinkedList = @import("linked_list.zig").SinglyLinkedList;
 
-pub fn TaggedLinkedList(Union: type) type {
+pub fn TaggedLinkedList(comptime T: type) type {
     return struct {
-        const info = @typeInfo(Union).@"union";
-        const fields = info.fields;
+        const @"union" = switch (@typeInfo(T)) {
+            .@"union" => |u| u,
+            else => @compileError("expected union type, found '" ++ @typeName(T) ++ "'"),
+        };
 
-        pub const Value = Union;
+        const Types = @"union".field_types;
 
-        pub const NODE_SIZE = @sizeOf(Value) + @sizeOf(?*Value);
-
-        pub const Tag = info.tag_type orelse
+        pub const Tag = @"union".tag_type orelse
             @compileError("TaggedLinkedList requires a tagged union");
 
-        pub fn Node(comptime tag: Tag) type {
-            return struct {
-                next: ?*@This() = null,
-                value: @FieldType(Union, @tagName(tag)),
-            };
-        }
-
         pub const Lists = bkl: {
-            var field_names: [fields.len][]const u8 = undefined;
-            var field_types: [fields.len]type = undefined;
-            var field_attrs: [fields.len]std.builtin.Type.StructField.Attributes = undefined;
+            var field_types: [Types.len]type = undefined;
+            var field_attrs: [Types.len]std.builtin.Type.Struct.FieldAttributes = undefined;
 
-            for (fields, &field_names, &field_types, &field_attrs) |field, *name, *Type, *attr| {
-                const List = SinglyLinkedList(Node(@field(Tag, field.name)));
+            for (Types, &field_types, &field_attrs) |@"type", *Type, *attr| {
+                Type.* = SinglyLinkedList(struct {
+                    next: ?*@This() = null,
+                    value: @"type",
+                });
 
-                name.* = field.name;
-                Type.* = List;
-                attr.* = .{ .@"align" = @alignOf(List) };
+                attr.* = .{ .@"align" = @alignOf(Type.*) };
             }
 
-            break :bkl @Struct(.auto, null, &field_names, &field_types, &field_attrs);
+            break :bkl @Struct(.auto, null, @"union".field_names, &field_types, &field_attrs);
         };
+
+        pub fn List(comptime tag: Tag) type {
+            return @FieldType(Lists, @tagName(tag));
+        }
+
+        pub fn Node(comptime tag: Tag) type {
+            return List(tag).Node;
+        }
 
         pub const empty: @This() = bkl: {
             var lists: Lists = undefined;
-            for (fields) |field| {
-                @field(lists, field.name) = .empty;
+
+            for (@"union".field_names) |name| {
+                @field(lists, name) = .empty;
             }
+
             break :bkl .{ .lists = lists };
         };
 
         lists: Lists,
 
-        pub fn get(self: *@This(), comptime tag: Tag) *SinglyLinkedList(Node(tag)) {
+        pub fn get(self: *@This(), comptime tag: Tag) *List(tag) {
             return &@field(self.lists, @tagName(tag));
         }
 

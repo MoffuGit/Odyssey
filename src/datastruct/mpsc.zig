@@ -196,7 +196,7 @@ test Mpsc {
     q.init();
 
     // Elems
-    var elems: [10]Elem = .{Elem{}} ** 10;
+    var elems: [10]Elem = @splat(Elem{});
 
     // One
     try testing.expect(q.pop() == null);
@@ -294,7 +294,7 @@ test "bounded MPSC supports concurrent producers" {
         thread.* = try std.Thread.spawn(.{}, ProducerContext.run, .{context});
     }
 
-    var seen: [total_values]bool = .{false} ** total_values;
+    var seen: [total_values]bool = @splat(false);
     var received: usize = 0;
     while (received < total_values) {
         if (channel.pop()) |value| {

@@ -3,15 +3,17 @@ const testing = std.testing;
 
 pub fn SinglyLinkedList(T: type) type {
     return struct {
+        pub const Node = T;
+
         pub const empty: @This() = .{
             .head = null,
             .tail = null,
         };
 
-        head: ?*T,
-        tail: ?*T,
+        head: ?*Node,
+        tail: ?*Node,
 
-        pub fn append(self: *@This(), value: *T) void {
+        pub fn append(self: *@This(), value: *Node) void {
             if (self.tail) |tail| {
                 tail.next = value;
                 self.tail = value;
@@ -21,7 +23,7 @@ pub fn SinglyLinkedList(T: type) type {
             }
         }
 
-        pub fn prepend(self: *@This(), value: *T) void {
+        pub fn prepend(self: *@This(), value: *Node) void {
             if (self.head) |head| {
                 value.next = head;
                 self.head = value;
@@ -45,7 +47,7 @@ pub fn SinglyLinkedList(T: type) type {
             other.tail = null;
         }
 
-        pub fn pop(self: *@This()) ?*T {
+        pub fn pop(self: *@This()) ?*Node {
             const head = self.head orelse return null;
 
             if (self.head == self.tail) self.tail = null;

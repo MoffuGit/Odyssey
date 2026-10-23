@@ -33,7 +33,7 @@ pub fn new(path: []const u8, filename_offset: u32, alloc: Allocator) ChunkedPath
     var memmap: MemMap = .{};
     var offset: usize = 0;
     while (offset < path.len) {
-        var canonical: Chunk = [_]u8{0} ** SIMD_CHUNK_BYTES;
+        var canonical: Chunk = @splat(0);
 
         const chunk = alloc.create(Chunk) catch @panic("SIMD CHUNK Overflow");
 
@@ -125,7 +125,7 @@ pub fn cmp(self: ChunkedPath, other: ChunkedPath) math.Order {
     if (other.len == 0) return .gt;
 
     const Vec = @Vector(SIMD_CHUNK_BYTES, u8);
-    const MaskInt = std.meta.Int(.unsigned, SIMD_CHUNK_BYTES);
+    const MaskInt = @Int(.unsigned, SIMD_CHUNK_BYTES);
     const all_ones: MaskInt = @as(MaskInt, 0) -% 1;
 
     var node_a = self.memmap.ranges.head;

@@ -73,7 +73,7 @@ pub const ChunkPool = struct {
         } else {
             const index = self.free_list;
 
-            const offset = @intFromEnum(index) * self.chunk_size;
+            const offset = @backingInt(index) * self.chunk_size;
             const chunk: *Chunk = @ptrCast(@alignCast(&self.ptr[offset]));
             const next = chunk.header().next;
             self.free_list = next;
@@ -96,7 +96,7 @@ pub const ChunkPool = struct {
 
         const offset = @intFromPtr(buffer.ptr) - @intFromPtr(self.ptr);
         assert(offset % self.chunk_size == 0);
-        const index: Index = @enumFromInt(offset / self.chunk_size);
+        const index: Index = @fromBackingInt(@intCast(offset / self.chunk_size));
         const chunk: *Chunk = @ptrCast(@alignCast(buffer.ptr));
 
         const head = self.free_list;
@@ -225,7 +225,7 @@ pub const ChunkAllocator = struct {
         const pool = self.findPool(len, alignment) orelse return null;
         const buffer = pool.alloc() orelse return null;
 
-        if (builtin.mode == .Debug and !builtin.is_test and len < buffer.len >> 1) {
+        if (builtin.mode == .debug and !builtin.is_test and len < buffer.len >> 1) {
             log.warn("Unused chunk size={} used={}", .{ buffer.len, len });
         }
 
@@ -243,7 +243,7 @@ pub const ChunkAllocator = struct {
         const pool = self.findPool(len, alignment) orelse return null;
         const buffer = pool.threadSafeAlloc(self.io) orelse return null;
 
-        if (builtin.mode == .Debug and !builtin.is_test and len < buffer.len >> 1) {
+        if (builtin.mode == .debug and !builtin.is_test and len < buffer.len >> 1) {
             log.warn("Unused chunk size={} used={}", .{ buffer.len, len });
         }
 

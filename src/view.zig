@@ -68,7 +68,7 @@ pub fn init(self: *View, gpa: Allocator) !void {
 
     for (&self.frame_chunks) |*pool| {
         try pool.init(arena, &.{
-            .{ .capacity = 2048, .chunk_size = Stacks.NODE_SIZE },
+            .{ .capacity = 2048, .chunk_size = @sizeOf(Attribute) + @sizeOf(?*Attribute) },
             .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
             .{ .capacity = 128, .chunk_size = @sizeOf(Event) },
         });
@@ -321,11 +321,11 @@ pub fn blkEnd(self: *View) void {
 }
 
 fn blkComplete(self: *View, block: *Block) void {
-    inline for (@typeInfo(Stacks.Tag).@"enum".fields) |field| {
-        const flag = @as(u64, 1) << field.value;
+    inline for (@typeInfo(Stacks.Tag).@"enum".field_values) |value| {
+        const flag = @as(u64, 1) << value;
         if (self.pop_flags & flag != 0) {
             self.pop_flags &= ~flag;
-            if (self.stacks.pop(@enumFromInt(field.value)) == null) unreachable;
+            if (self.stacks.pop(@fromBackingInt(value)) == null) unreachable;
         }
     }
 
@@ -472,7 +472,7 @@ const Event = struct {
     type: win.EventType,
 };
 
-const Stacks = TaggedLinkedList(union(enum) {
+pub const Attribute = union(enum) {
     parent: *Block,
     axis: Axis,
     background: [4]f32,
@@ -485,14 +485,14 @@ const Stacks = TaggedLinkedList(union(enum) {
     border: [4]f32,
     thickness: f32,
     padding: struct { Sizing, f32 },
-});
+};
 
-pub const Attribute = Stacks.Value;
+const Stacks = TaggedLinkedList(Attribute);
 pub const Node = Stacks.Node;
 pub const StackField = Stacks.Tag;
 
 fn stackFlag(field: StackField) u64 {
-    return @as(u64, 1) << @intFromEnum(field);
+    return @as(u64, 1) << @backingInt(field);
 }
 
 const Cache = struct {
@@ -704,7 +704,7 @@ pub const Block = struct {
                     var total: f32 = 0.0;
                     var children = current.children.first;
                     while (children) |child| : (children = child.next) {
-                        if (@intFromEnum(current.axis) == axis) {
+                        if (@backingInt(current.axis) == axis) {
                             total += child.size[axis];
                         } else {
                             total = @max(total, child.size[axis]);
@@ -724,7 +724,7 @@ pub const Block = struct {
             const allowed = current.size[axis];
             const overflow_mask = @as(u2, 1) << axis;
 
-            if (@intFromEnum(current.axis) != axis and
+            if (@backingInt(current.axis) != axis and
                 current.flags.overflow & overflow_mask == 0)
             {
                 var children = current.children.first;
@@ -737,7 +737,7 @@ pub const Block = struct {
                 }
             }
 
-            if (@intFromEnum(current.axis) == axis and
+            if (@backingInt(current.axis) == axis and
                 current.flags.overflow & overflow_mask == 0)
             {
                 var used: f32 = 0.0;
@@ -786,7 +786,7 @@ pub const Block = struct {
             while (children) |child| : (children = child.next) {
                 child.position[axis] = position;
 
-                if (@intFromEnum(current.axis) == axis) {
+                if (@backingInt(current.axis) == axis) {
                     position += child.size[axis];
                     bounds += child.size[axis];
                 } else {

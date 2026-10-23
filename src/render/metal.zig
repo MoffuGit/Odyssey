@@ -115,7 +115,7 @@ pub const Handle = struct {
         const layer = CAMetalLayer.msgSend(objc.Object, "layer", .{});
         layer.setProperty("device", api.device);
         layer.setProperty("opaque", true);
-        layer.setProperty("pixelFormat", @intFromEnum(c.MTLPixelFormat.bgra8unorm));
+        layer.setProperty("pixelFormat", @backingInt(c.MTLPixelFormat.bgra8unorm));
         layer.setProperty("contentsGravity", macos.animation.kCAGravityTopLeft);
 
         const view = objc.Object.fromId(window.osView() orelse unreachable);
@@ -323,7 +323,7 @@ pub const RenderPass = struct {
 
                 attachment.setProperty(
                     "loadAction",
-                    @intFromEnum(@as(
+                    @backingInt(@as(
                         c.MTLLoadAction,
                         if (attch.clear_color != null)
                             .clear
@@ -333,7 +333,7 @@ pub const RenderPass = struct {
                 );
                 attachment.setProperty(
                     "storeAction",
-                    @intFromEnum(c.MTLStoreAction.store),
+                    @backingInt(c.MTLStoreAction.store),
                 );
                 attachment.setProperty("texture", attch.target.texture);
                 if (attch.clear_color) |color| attachment.setProperty(
@@ -430,7 +430,7 @@ pub const RenderPass = struct {
             void,
             objc.sel("drawPrimitives:vertexStart:vertexCount:instanceCount:"),
             .{
-                @intFromEnum(s.draw.type),
+                @backingInt(s.draw.type),
                 @as(c_ulong, 0),
                 @as(c_ulong, s.draw.vertex_count),
                 @as(c_ulong, s.draw.instance_count),
@@ -574,7 +574,7 @@ pub const Pipeline = struct {
                     .{@as(c_ulong, 0)},
                 );
 
-                layout.setProperty("stepFunction", @intFromEnum(opts.step_fn));
+                layout.setProperty("stepFunction", @backingInt(opts.step_fn));
                 layout.setProperty("stride", @as(c_ulong, @sizeOf(V)));
             }
 
@@ -590,17 +590,17 @@ pub const Pipeline = struct {
                 .{@as(c_ulong, i)},
             );
 
-            attachment.setProperty("pixelFormat", @intFromEnum(at.pixel_format));
+            attachment.setProperty("pixelFormat", @backingInt(at.pixel_format));
 
             attachment.setProperty("blendingEnabled", at.blending_enabled);
 
             if (at.blending_enabled) {
-                attachment.setProperty("rgbBlendOperation", @intFromEnum(c.MTLBlendOperation.add));
-                attachment.setProperty("alphaBlendOperation", @intFromEnum(c.MTLBlendOperation.add));
-                attachment.setProperty("sourceRGBBlendFactor", @intFromEnum(c.MTLBlendFactor.one));
-                attachment.setProperty("sourceAlphaBlendFactor", @intFromEnum(c.MTLBlendFactor.one));
-                attachment.setProperty("destinationRGBBlendFactor", @intFromEnum(c.MTLBlendFactor.one_minus_source_alpha));
-                attachment.setProperty("destinationAlphaBlendFactor", @intFromEnum(c.MTLBlendFactor.one_minus_source_alpha));
+                attachment.setProperty("rgbBlendOperation", @backingInt(c.MTLBlendOperation.add));
+                attachment.setProperty("alphaBlendOperation", @backingInt(c.MTLBlendOperation.add));
+                attachment.setProperty("sourceRGBBlendFactor", @backingInt(c.MTLBlendFactor.one));
+                attachment.setProperty("sourceAlphaBlendFactor", @backingInt(c.MTLBlendFactor.one));
+                attachment.setProperty("destinationRGBBlendFactor", @backingInt(c.MTLBlendFactor.one_minus_source_alpha));
+                attachment.setProperty("destinationAlphaBlendFactor", @backingInt(c.MTLBlendFactor.one_minus_source_alpha));
             }
         }
 
@@ -622,13 +622,14 @@ pub const Pipeline = struct {
     }
 
     fn autoAttribute(T: type, attrs: objc.Object) void {
-        inline for (@typeInfo(T).@"struct".fields, 0..) |field, i| {
-            const offset = @offsetOf(T, field.name);
+        const info = @typeInfo(T).@"struct";
+        inline for (info.field_names, info.field_types, 0..) |name, @"type", i| {
+            const offset = @offsetOf(T, name);
 
-            const FT = switch (@typeInfo(field.type)) {
+            const FT = switch (@typeInfo(@"type")) {
                 .@"struct" => |e| e.backing_integer.?,
                 .@"enum" => |e| e.tag_type,
-                else => field.type,
+                else => @"type",
             };
 
             // Very incomplete list, expand as necessary.
@@ -657,7 +658,7 @@ pub const Pipeline = struct {
                 .{@as(c_ulong, i)},
             );
 
-            attr.setProperty("format", @intFromEnum(format));
+            attr.setProperty("format", @backingInt(format));
             attr.setProperty("offset", @as(c_ulong, offset));
             attr.setProperty("bufferIndex", @as(c_ulong, 0));
         }
@@ -696,11 +697,11 @@ const PipelineDescription = struct {
 
 /// We create a type for the pipeline collection based on our desc array.
 const PipelineCollection = t: {
-    const StructField = std.builtin.Type.StructField;
+    const Attributes = std.builtin.Type.Struct.FieldAttributes;
 
     var names: [pipeline_descs.len][]const u8 = undefined;
-    var types = [_]type{Pipeline} ** pipeline_descs.len;
-    var attrs = [_]StructField.Attributes{.{ .@"align" = @alignOf(Pipeline) }} ** pipeline_descs.len;
+    var types: [pipeline_descs.len]type = @splat(Pipeline);
+    var attrs: [pipeline_descs.len]Attributes = @splat(.{ .@"align" = @alignOf(Pipeline) });
 
     for (pipeline_descs, &names) |pipeline, *name| {
         name.* = pipeline[0];
