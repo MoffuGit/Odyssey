@@ -51,7 +51,7 @@ pub fn setEventCallback(flag: EventKind, comptime function: *const fn (event: Ev
             @call(.always_inline, function, .{event});
         }
     };
-    _ = rgfw.RGFW_setEventCallback(@intFromEnum(flag), TypeErased.callback);
+    _ = rgfw.RGFW_setEventCallback(@backingInt(flag), TypeErased.callback);
 }
 
 pub const Options = struct {
@@ -247,14 +247,14 @@ pub const Event = struct {
     pub fn convert(ptr: rgfw.RGFW_event) Event {
         return .{
             .win = .{ .ptr = ptr.common.win },
-            .type = switch (@as(EventKind, @enumFromInt(ptr.type))) {
+            .type = switch (@as(EventKind, @fromBackingInt(@intCast(ptr.type)))) {
                 .none => .none,
                 .window_focus_in => .focus_in,
                 .window_focus_out => .focus_out,
                 .key_char => .{ .key_char = ptr.keyChar.value },
                 .key_released, .key_pressed => .{
                     .key = .{
-                        .type = @enumFromInt(ptr.type),
+                        .type = @fromBackingInt(@intCast(ptr.type)),
                         .modifiers = ptr.key.mod,
                         .value = ptr.key.value,
                         .repeat = ptr.key.repeat == rgfw.RGFW_TRUE,
@@ -265,7 +265,7 @@ pub const Event = struct {
                         .inside = ptr.mouse.inWindow == rgfw.RGFW_TRUE,
                         .x = ptr.delta.x,
                         .y = ptr.delta.y,
-                        .type = @enumFromInt(ptr.type),
+                        .type = @fromBackingInt(@intCast(ptr.type)),
                     },
                 },
                 .mouse_motion, .mouse_enter, .mouse_leave => .{
@@ -273,13 +273,13 @@ pub const Event = struct {
                         .inside = ptr.mouse.inWindow == rgfw.RGFW_TRUE,
                         .x = @floatFromInt(ptr.mouse.x),
                         .y = @floatFromInt(ptr.mouse.y),
-                        .type = @enumFromInt(ptr.type),
+                        .type = @fromBackingInt(@intCast(ptr.type)),
                     },
                 },
                 .mouse_button_released, .mouse_button_pressed => .{
                     .mouse_button = .{
-                        .button = @enumFromInt(ptr.button.value),
-                        .type = @enumFromInt(ptr.type),
+                        .button = @fromBackingInt(@intCast(ptr.button.value)),
+                        .type = @fromBackingInt(@intCast(ptr.type)),
                     },
                 },
                 .mouse_scroll => .{
@@ -298,7 +298,7 @@ pub const Event = struct {
                         .y = @floatFromInt(ptr.update.y),
                         .width = @floatFromInt(ptr.update.w),
                         .height = @floatFromInt(ptr.update.h),
-                        .type = @enumFromInt(ptr.type),
+                        .type = @fromBackingInt(@intCast(ptr.type)),
                     },
                 },
                 .data_drop => .data_drop,

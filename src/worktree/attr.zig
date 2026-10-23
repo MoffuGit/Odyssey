@@ -142,7 +142,7 @@ pub const BulkAttr = if (!supported) struct {} else struct {
             const n = getattrlistbulk(self.fd, &self.alist, self.buf.ptr, self.buf.len, FSOPT_NOFOLLOW);
             if (n < 0) {
                 const e = std.c._errno().*;
-                switch (@as(std.c.E, @enumFromInt(e))) {
+                switch (@as(std.c.E, @fromBackingInt(@intCast(e)))) {
                     .INTR => continue,
                     .INVAL, .OPNOTSUPP => return if (self.primed) error.ReadFailed else error.Unsupported,
                     .ACCES, .PERM => return error.PermissionDenied,

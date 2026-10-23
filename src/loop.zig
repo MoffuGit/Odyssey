@@ -824,7 +824,7 @@ pub const Waker = struct {
 
     pub fn wake(self: *const Waker) !void {
         var msg: posix.system.mach_msg_header_t = .{
-            .msgh_bits = @intFromEnum(system.MACH.MSG.TYPE.COPY_SEND),
+            .msgh_bits = @backingInt(system.MACH.MSG.TYPE.COPY_SEND),
             .msgh_size = @sizeOf(posix.system.mach_msg_header_t),
             .msgh_remote_port = self.port,
             .msgh_local_port = system.MACH.PORT.NULL,
@@ -838,7 +838,7 @@ pub const Waker = struct {
             msg.msgh_size,
             0,
             system.MACH.PORT.NULL,
-            @enumFromInt(0),
+            @fromBackingInt(@intCast(0)),
             system.MACH.PORT.NULL,
         )) {
             .SUCCESS => {},
@@ -873,13 +873,13 @@ test "mach port" {
     var mach_port: posix.system.mach_port_name_t = undefined;
     try testing.expectEqual(posix.system.mach_msg_return_t.SUCCESS, @as(
         posix.system.mach_msg_return_t,
-        @enumFromInt(
+        @fromBackingInt(@intCast(
             posix.system.mach_port_allocate(
                 mach_self,
                 posix.system.MACH.PORT.RIGHT.RECEIVE,
                 &mach_port,
             ),
-        ),
+        )),
     ));
     defer _ = posix.system.mach_port_deallocate(mach_self, mach_port);
 
@@ -912,7 +912,7 @@ test "mach port" {
     try testing.expect(!mach_test.called);
 
     var msg: posix.system.mach_msg_header_t = .{
-        .msgh_bits = @intFromEnum(posix.system.MACH.MSG.TYPE.MAKE_SEND_ONCE),
+        .msgh_bits = @backingInt(posix.system.MACH.MSG.TYPE.MAKE_SEND_ONCE),
         .msgh_size = @sizeOf(posix.system.mach_msg_header_t),
         .msgh_remote_port = mach_port,
         .msgh_local_port = posix.system.MACH.PORT.NULL,
@@ -962,13 +962,13 @@ test "cancel mach port" {
     var mach_port: posix.system.mach_port_name_t = undefined;
     try testing.expectEqual(posix.system.mach_msg_return_t.SUCCESS, @as(
         posix.system.mach_msg_return_t,
-        @enumFromInt(
+        @fromBackingInt(@intCast(
             posix.system.mach_port_allocate(
                 mach_self,
                 posix.system.MACH.PORT.RIGHT.RECEIVE,
                 &mach_port,
             ),
-        ),
+        )),
     ));
     defer _ = posix.system.mach_port_deallocate(mach_self, mach_port);
 
@@ -1021,7 +1021,7 @@ test "cancel mach port" {
 
     // Send a message to the port
     var msg: posix.system.mach_msg_header_t = .{
-        .msgh_bits = @intFromEnum(posix.system.MACH.MSG.TYPE.MAKE_SEND_ONCE),
+        .msgh_bits = @backingInt(posix.system.MACH.MSG.TYPE.MAKE_SEND_ONCE),
         .msgh_size = @sizeOf(posix.system.mach_msg_header_t),
         .msgh_remote_port = mach_port,
         .msgh_local_port = posix.system.MACH.PORT.NULL,

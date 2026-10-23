@@ -15,7 +15,7 @@ pub fn entityOrder(a: EntityId, b: EntityId) std.math.Order {
     const index_order = std.math.order(a.index, b.index);
     if (index_order != .eq) return index_order;
 
-    return std.math.order(@intFromEnum(a.generation), @intFromEnum(b.generation));
+    return std.math.order(@backingInt(a.generation), @backingInt(b.generation));
 }
 
 pub const AnyEntity = struct {

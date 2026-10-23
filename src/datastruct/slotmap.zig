@@ -15,7 +15,7 @@ pub const Key = packed struct {
             if (self == .invalid) {
                 try writer.writeAll(".invalid");
             } else {
-                try writer.print("0x{X}", .{@intFromEnum(self)});
+                try writer.print("0x{X}", .{@backingInt(self)});
             }
         }
     };
@@ -68,7 +68,7 @@ pub const Key = packed struct {
 
     pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         assert(self.generation != .invalid);
-        try writer.print("0x{X}:{X}", .{ self.index, @intFromEnum(self.generation) });
+        try writer.print("0x{X}:{X}", .{ self.index, @backingInt(self.generation) });
     }
 
     pub fn eql(self: @This(), other: @This()) bool {
@@ -196,7 +196,7 @@ pub fn SlotMap(Value: type) type {
             // Check that this key was once or is currently valid
             assert(key.generation != .invalid);
             assert(key.index < self.next_index);
-            assert(gen == .invalid or @intFromEnum(key.generation) <= @intFromEnum(gen));
+            assert(gen == .invalid or @backingInt(key.generation) <= @backingInt(gen));
 
             // Check if the key is currently valid
             return key.generation == gen;
@@ -213,7 +213,7 @@ pub fn SlotMap(Value: type) type {
             if (!self.contains(key)) return null;
 
             self.slots[key.index].generation =
-                @enumFromInt(@intFromEnum(self.slots[key.index].generation) +% 1);
+                @fromBackingInt(@intCast(@backingInt(self.slots[key.index].generation) +% 1));
             if (self.slots[key.index].generation == .invalid) {
                 self.saturated += 1;
             } else {
@@ -341,17 +341,17 @@ test "slot map" {
 
     const a = try slots.put('a');
     try std.testing.expectEqual(0, a.index);
-    try std.testing.expectEqual(1, @intFromEnum(a.generation));
+    try std.testing.expectEqual(1, @backingInt(a.generation));
     try std.testing.expectEqual(1, slots.count());
 
     const b = try slots.put('b');
     try std.testing.expectEqual(1, b.index);
-    try std.testing.expectEqual(1, @intFromEnum(b.generation));
+    try std.testing.expectEqual(1, @backingInt(b.generation));
     try std.testing.expectEqual(2, slots.count());
 
     const c = try slots.put('c');
     try std.testing.expectEqual(2, c.index);
-    try std.testing.expectEqual(1, @intFromEnum(c.generation));
+    try std.testing.expectEqual(1, @backingInt(c.generation));
     try std.testing.expectEqual(3, slots.count());
 
     try std.testing.expectEqual('a', slots.get(a).?.*);
@@ -392,7 +392,7 @@ test "slot map" {
 
     const d = try slots.put('d');
     try std.testing.expectEqual(2, d.index);
-    try std.testing.expectEqual(2, @intFromEnum(d.generation));
+    try std.testing.expectEqual(2, @backingInt(d.generation));
     try std.testing.expectEqual(2, slots.count());
 
     try std.testing.expect(d != a);
@@ -402,7 +402,7 @@ test "slot map" {
 
     const e = try slots.put('e');
     try std.testing.expectEqual(0, e.index);
-    try std.testing.expectEqual(2, @intFromEnum(e.generation));
+    try std.testing.expectEqual(2, @backingInt(e.generation));
     try std.testing.expectEqual(3, slots.count());
 
     try std.testing.expectError(error.Overflow, slots.put('f'));
@@ -418,9 +418,9 @@ test "slot map" {
     _ = slots.remove(d);
     _ = slots.remove(e);
     try std.testing.expectEqual(0, slots.count());
-    slots.slots[b.index].generation = @enumFromInt(std.math.maxInt(u32) - 1);
-    slots.slots[d.index].generation = @enumFromInt(std.math.maxInt(u32) - 1);
-    slots.slots[e.index].generation = @enumFromInt(std.math.maxInt(u32) - 1);
+    slots.slots[b.index].generation = @fromBackingInt(@intCast(std.math.maxInt(u32) - 1));
+    slots.slots[d.index].generation = @fromBackingInt(@intCast(std.math.maxInt(u32) - 1));
+    slots.slots[e.index].generation = @fromBackingInt(@intCast(std.math.maxInt(u32) - 1));
 
     try std.testing.expectEqual(0, slots.saturated);
 
@@ -470,19 +470,19 @@ test "recycle key" {
 
     const a = try slots.put('a');
     try std.testing.expectEqual(0, a.index);
-    try std.testing.expectEqual(1, @intFromEnum(a.generation));
+    try std.testing.expectEqual(1, @backingInt(a.generation));
     try std.testing.expectEqual(1, slots.count());
 
     slots.recycle(a);
 
     const b = try slots.put('b');
     try std.testing.expectEqual(0, b.index);
-    try std.testing.expectEqual(1, @intFromEnum(b.generation));
+    try std.testing.expectEqual(1, @backingInt(b.generation));
     try std.testing.expectEqual(1, slots.count());
 
     const c = try slots.put('c');
     try std.testing.expectEqual(1, c.index);
-    try std.testing.expectEqual(1, @intFromEnum(c.generation));
+    try std.testing.expectEqual(1, @backingInt(c.generation));
     try std.testing.expectEqual(2, slots.count());
 }
 
@@ -533,21 +533,21 @@ test "secondary map" {
 test "format key" {
     try std.testing.expectFmt("0xA:B", "{f}", .{Key{
         .index = 10,
-        .generation = @enumFromInt(11),
+        .generation = @fromBackingInt(@intCast(11)),
     }});
     try std.testing.expectFmt("0xA:B", "{f}", .{(Key{
         .index = 10,
-        .generation = @enumFromInt(11),
+        .generation = @fromBackingInt(@intCast(11)),
     }).toOptional()});
     try std.testing.expectFmt(".invalid", "{f}", .{Key.Generation.invalid});
-    try std.testing.expectFmt("0xF", "{f}", .{@as(Key.Generation, @enumFromInt(0xf))});
+    try std.testing.expectFmt("0xF", "{f}", .{@as(Key.Generation, @fromBackingInt(@intCast(0xf)))});
     try std.testing.expectFmt(".none", "{f}", .{Key.Optional.none});
 }
 
 test "eql" {
-    const a: Key = .{ .index = 1, .generation = @enumFromInt(2) };
-    const b: Key = .{ .index = 2, .generation = @enumFromInt(2) };
-    const c: Key = .{ .index = 1, .generation = @enumFromInt(3) };
+    const a: Key = .{ .index = 1, .generation = @fromBackingInt(@intCast(2)) };
+    const b: Key = .{ .index = 2, .generation = @fromBackingInt(@intCast(2)) };
+    const c: Key = .{ .index = 1, .generation = @fromBackingInt(@intCast(3)) };
 
     try std.testing.expect(a.eql(a));
     try std.testing.expect(!a.eql(b));
