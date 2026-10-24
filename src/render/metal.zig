@@ -641,6 +641,7 @@ pub const Pipeline = struct {
                 [2]f32 => c.MTLVertexFormat.float2,
                 [3]f32 => c.MTLVertexFormat.float3,
                 [4]f32 => c.MTLVertexFormat.float4,
+                u128 => c.MTLVertexFormat.float4,
                 i32 => c.MTLVertexFormat.int,
                 [2]i32 => c.MTLVertexFormat.int2,
                 [4]i32 => c.MTLVertexFormat.int2,

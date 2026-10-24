@@ -26,11 +26,11 @@ height: u64,
 regions: DoublyLinkedList(RegionNode),
 free: DoublyLinkedList(RegionNode),
 
-pub fn init(self: *Atlas, w: u64, h: u64, alloc: Allocator) !void {
+pub fn init(self: *Atlas, w: u64, h: u64, gpa: Allocator) !void {
     self.* = .{
         .width = w,
         .height = h,
-        .arena = .init(alloc),
+        .arena = .init(gpa),
         .buffer = undefined,
         .regions = .empty,
         .free = .empty,

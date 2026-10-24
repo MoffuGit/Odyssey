@@ -30,6 +30,9 @@ renderer: Renderer,
 states: SinglyLinkedList(WindowState),
 
 pub fn init(self: *App, gpa: Allocator, io: Io) !void {
+    try win.init("Odyssey", 0);
+    errdefer win.deinit();
+
     self.* = .{
         .arena = .init(gpa),
         .chunks = undefined,
@@ -51,9 +54,6 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
         },
     });
 
-    try win.init("Odyssey", 0);
-    errdefer win.deinit();
-
     try self.core.init(gpa, io, .{});
     errdefer self.core.deinit();
 
@@ -69,8 +69,8 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
 pub fn deinit(self: *App) void {
     self.renderer.deinit();
     self.core.deinit();
-    win.deinit();
     self.arena.deinit();
+    win.deinit();
 }
 
 pub fn run(self: *App) void {
@@ -245,12 +245,15 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
 
                 try frame.rect(&app.renderer, .{
                     .position = rect,
+                    .src_position = undefined,
                     .color_0 = box.border,
                     .color_1 = box.border,
                     .color_2 = box.border,
                     .color_3 = box.border,
                     .corner_rads = radius,
-                    .border = thickness,
+                    .style = .{
+                        .border_thickness = thickness,
+                    },
                 });
 
                 rect[0] += thickness;
@@ -262,12 +265,13 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             if (box.flags.background) {
                 try frame.rect(&app.renderer, .{
                     .position = rect,
+                    .src_position = undefined,
                     .color_0 = box.color,
                     .color_1 = box.color,
                     .color_2 = box.color,
                     .color_3 = box.color,
                     .corner_rads = box.radius,
-                    .border = 0.0,
+                    .style = .{},
                 });
             }
         }

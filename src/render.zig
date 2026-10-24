@@ -62,7 +62,6 @@ pub fn render(renderer: *Renderer, handle: *Renderer.Handle, frame_state: *Frame
     });
     defer pass.complete();
 
-    // bytesNoCopy requires both ends of the wrapped region to be page-aligned.
     const uniform = renderer.buffer(
         @ptrCast(&frame_state.uniforms),
         PAGE_SIZE,
@@ -92,12 +91,20 @@ pub const Uniforms = extern struct {
 
 pub const Rect = extern struct {
     position: [4]f32 align(16),
+    src_position: [4]f32 align(16),
     color_0: [4]f32 align(16),
     color_1: [4]f32 align(16),
     color_2: [4]f32 align(16),
     color_3: [4]f32 align(16),
     corner_rads: [4]f32 align(16),
-    border: f32 align(4),
+    style: Style align(16),
+};
+
+pub const Style = packed struct(u128) {
+    border_thickness: f32 = 0.0,
+    softness: f32 = 1.0,
+    omit_src: f32 = 1.0,
+    _padding: f32 = 0.0,
 };
 
 pub const FrameState = struct {
