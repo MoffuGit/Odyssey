@@ -3,4 +3,8 @@
 .DS_STORE
 zig-out/
 test/*
+zig-pkg/*
 !test/build.zig
+
+!zig-pkg/apple-sdk/
+!zig-pkg/macos/

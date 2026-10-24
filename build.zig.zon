@@ -34,7 +34,10 @@
     .dependencies = .{
         .macos = .{ .path = "./zig-pkg/macos" },
         .apple_sdk = .{ .path = "./zig-pkg/apple-sdk" },
-        .true_type = .{ .path = "./zig-pkg/TrueType" },
+        .true_type = .{
+            .url = "git+https://codeberg.org/MMffrr1/TrueType.git/#main",
+            .hash = "TrueType-3.0.0-dev-Ne-mWD14AQB5YZL8AaHgsHhWWHxusJfsQZmzApg-f_QZ",
+        },
         .zig_objc = .{
             .url = "https://deps.files.ghostty.org/zig_objc-3352c12a868f8787ab71bf2ca6eab9fcfb635c52.tar.gz",
             .hash = "zig_objc-0.0.0-Ir_Sp_4tAQDXtPi51nW_jD9LOEzBvU9lofwO9Pzi6IB4",
