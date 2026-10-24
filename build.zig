@@ -14,6 +14,11 @@ pub fn build(b: *std.Build) void {
 
     const benchmark = b.option(bool, "enable-benchmark", "Benchmark flag") orelse false;
 
+    const true_type = b.dependency("true_type", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const objc = b.dependency("zig_objc", .{
         .target = target,
         .optimize = optimize,
@@ -35,6 +40,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "objc", .module = objc.module("objc") },
             .{ .name = "macos", .module = macos.module("macos") },
+            .{ .name = "true_type", .module = true_type.module("TrueType") },
             .{ .name = "rgfw", .module = rgfw },
         },
     });

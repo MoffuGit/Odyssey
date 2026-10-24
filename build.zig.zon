@@ -34,6 +34,7 @@
     .dependencies = .{
         .macos = .{ .path = "./zig-pkg/macos" },
         .apple_sdk = .{ .path = "./zig-pkg/apple-sdk" },
+        .true_type = .{ .path = "./zig-pkg/TrueType" },
         .zig_objc = .{
             .url = "https://deps.files.ghostty.org/zig_objc-3352c12a868f8787ab71bf2ca6eab9fcfb635c52.tar.gz",
             .hash = "zig_objc-0.0.0-Ir_Sp_4tAQDXtPi51nW_jD9LOEzBvU9lofwO9Pzi6IB4",
