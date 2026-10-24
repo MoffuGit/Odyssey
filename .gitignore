@@ -4,6 +4,7 @@
 zig-out/
 test/*
 zig-pkg/*
+zig-pkg/macos/zig-pkg/*
 !test/build.zig
 
 !zig-pkg/apple-sdk/
