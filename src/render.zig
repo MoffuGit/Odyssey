@@ -192,7 +192,7 @@ pub const FrameState = struct {
 
         self.uniform_buffer = renderer.buffer(@ptrCast(&self.uniforms), PAGE_SIZE);
 
-        try self.atlas_texture.init(renderer.textureOptions(), 1, 1, null);
+        self.atlas_texture = try renderer.texture(1, 1, null);
         errdefer self.atlas_texture.release();
     }
 

@@ -93,6 +93,25 @@ pub fn buffer(
     );
 }
 
+pub fn texture(self: *Metal, width: usize, height: usize, data: ?[]const u8) !Texture {
+    return .init(
+        self.device,
+        width,
+        height,
+        data,
+        .{
+            .pixel_format = .r8unorm,
+            .resource_options = .{
+                .cpu_cache_mode = .write_combined,
+                .storage_mode = .shared,
+            },
+            .usage = .{
+                .shader_read = true,
+            },
+        },
+    );
+}
+
 pub fn start(self: *Metal) void {
     assert(self.autorelease_pool == null);
     self.autorelease_pool = .init();
@@ -106,20 +125,6 @@ pub fn end(self: *Metal) void {
 
 pub fn frame(self: *Metal, handle: *Handle) Frame {
     return .begin(self, handle);
-}
-
-pub fn textureOptions(self: *Metal) Texture.Options {
-    return .{
-        .device = self.device,
-        .pixel_format = .r8unorm,
-        .resource_options = .{
-            .cpu_cache_mode = .write_combined,
-            .storage_mode = .shared,
-        },
-        .usage = .{
-            .shader_read = true,
-        },
-    };
 }
 
 pub const Context = struct {
@@ -188,16 +193,14 @@ pub const Target = struct {
 
     pub fn init(layer: objc.Object) Target {
         const drawable = layer.msgSend(objc.Object, "nextDrawable", .{});
-        const texture = drawable.msgSend(objc.Object, "texture", .{});
+        const tx = drawable.msgSend(objc.Object, "texture", .{});
 
-        return .{ .drawable = drawable, .texture = texture };
+        return .{ .drawable = drawable, .texture = tx };
     }
 };
 
 pub const Texture = struct {
     pub const Options = struct {
-        /// MTLDevice
-        device: objc.Object,
         pixel_format: c.MTLPixelFormat,
         resource_options: c.MTLResourceOptions,
         usage: c.MTLTextureUsage,
@@ -216,12 +219,12 @@ pub const Texture = struct {
 
     /// Initialize a texture
     pub fn init(
-        self: *Texture,
-        opts: Options,
+        device: objc.Object,
         width: usize,
         height: usize,
         data: ?[]const u8,
-    ) !void {
+        opts: Options,
+    ) !Texture {
         // Create our descriptor
         const desc = init: {
             const Class = objc.getClass("MTLTextureDescriptor").?;
@@ -239,13 +242,13 @@ pub const Texture = struct {
         desc.setProperty("usage", opts.usage);
 
         // Initialize
-        const id = opts.device.msgSend(
+        const id = device.msgSend(
             ?*anyopaque,
             objc.sel("newTextureWithDescriptor:"),
             .{desc},
         ) orelse return error.MetalFailed;
 
-        self.* = .{
+        var self: Texture = .{
             .texture = objc.Object.fromId(id),
             .width = width,
             .height = height,
@@ -257,6 +260,8 @@ pub const Texture = struct {
             assert(d.len == width * height * self.bpp);
             try self.replaceRegion(0, 0, width, height, d);
         }
+
+        return self;
     }
 
     pub fn release(self: *Texture) void {
