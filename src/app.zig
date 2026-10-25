@@ -15,6 +15,7 @@ const Handle = render.Handle;
 const View = @import("view.zig");
 const win = @import("window.zig");
 const Window = win.Window;
+const FontManager = @import("font.zig");
 
 const log = std.log.scoped(.app);
 
@@ -28,12 +29,14 @@ core: Core,
 display: Display,
 renderer: Renderer,
 states: SinglyLinkedList(WindowState),
+font_manager: FontManager,
 
 pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     try win.init("Odyssey", 0);
     errdefer win.deinit();
 
     self.* = .{
+        .font_manager = undefined,
         .arena = .init(gpa),
         .chunks = undefined,
         .io = io,
@@ -43,6 +46,9 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
         .core = undefined,
         .display = undefined,
     };
+
+    try self.font_manager.init(gpa);
+    errdefer self.font_manager.deinit();
 
     const arena = self.arena.allocator();
     errdefer self.arena.deinit();
@@ -225,12 +231,25 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
     }
 
     {
+        const font_manager = app.font_manager;
         const frame = ws.handle.nextFrame();
         errdefer ws.handle.releaseFrame();
 
         frame.uniforms = .{
             .viewport_size = try ws.win.size(),
         };
+
+        if (font_manager.atlas_gen != frame.atlas_gen) {
+            const atlas = font_manager.atlas;
+
+            try render.syncTexture(
+                &app.renderer,
+                frame.atlas_texture,
+                atlas.width,
+                atlas.height,
+                atlas.data,
+            );
+        }
 
         var node = ws.view.root;
         while (node) |box| : (node = box.nextPre()) {
