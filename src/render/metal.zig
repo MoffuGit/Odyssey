@@ -10,12 +10,12 @@ const objc = @import("objc");
 
 const datastruct = @import("../datastruct.zig");
 const render = @import("../render.zig");
-const FrameState = render.FrameState;
+const Handle = render.Handle;
 const win = @import("../window.zig");
 const Window = win.Window;
 const c = @import("metal/c.zig");
 
-const BufferCount = 3;
+pub const BufferCount = 3;
 
 const pipeline_descs: []const struct { [:0]const u8, PipelineDescription } =
     &.{
@@ -101,14 +101,11 @@ pub fn frame(self: *Metal, handle: *Handle) Frame {
     return .begin(self, handle);
 }
 
-pub const Handle = struct {
+pub const Context = struct {
     layer: objc.Object,
-    swap_chain: SwapChain,
 
-    pub fn init(self: *@This(), api: *const Metal, window: *Window, gpa: Allocator, io: Io) !void {
-        self.* = .{ .layer = undefined, .swap_chain = undefined };
-
-        try self.swap_chain.init(gpa, io);
+    pub fn init(self: *@This(), api: *const Metal, window: *Window) !void {
+        self.* = .{ .layer = undefined };
 
         const CAMetalLayer = objc.getClass("CAMetalLayer").?;
 
@@ -124,26 +121,11 @@ pub const Handle = struct {
         self.layer = layer;
     }
 
-    pub fn nextFrame(self: *Handle) *FrameState {
-        const next = self.swap_chain.nextFrame();
-        next.reset();
-        return next;
-    }
-
-    pub fn releaseFrame(self: *Handle) void {
-        self.swap_chain.releaseFrame();
-    }
-
-    pub fn target(self: *const Handle) Target {
-        return .init(self.layer);
-    }
-
     pub fn deinit(self: *@This()) void {
         self.layer.release();
-        self.swap_chain.deinit();
     }
 
-    pub fn update(self: *@This(), width: f32, height: f32, sync: bool) void {
+    pub fn target(self: *const @This(), width: f32, height: f32, sync: bool) Target {
         const size: macos.graphics.Size = .{
             .width = width,
             .height = height,
@@ -151,6 +133,8 @@ pub const Handle = struct {
         self.layer.msgSend(void, "setDrawableSize:", .{size});
 
         self.layer.setProperty("presentsWithTransaction", sync);
+
+        return .init(self.layer);
     }
 };
 
@@ -442,40 +426,6 @@ pub const RenderPass = struct {
     /// This struct can no longer be used after calling this.
     pub fn complete(self: *const RenderPass) void {
         self.encoder.msgSend(void, objc.sel("endEncoding"), .{});
-    }
-};
-
-pub const SwapChain = struct {
-    io: Io,
-    buffer: [BufferCount]FrameState,
-    index: std.math.IntFittingRange(0, BufferCount) = 0,
-    semaphore: std.Io.Semaphore = .{ .permits = BufferCount },
-
-    pub fn init(self: *@This(), gpa: Allocator, io: Io) !void {
-        self.* = .{
-            .io = io,
-            .buffer = undefined,
-        };
-
-        for (&self.buffer) |*frame_state| {
-            try frame_state.init(gpa);
-        }
-    }
-
-    pub fn deinit(self: *@This()) void {
-        for (0..BufferCount) |_| self.semaphore.waitUncancelable(self.io);
-        for (&self.buffer) |*frame_state| frame_state.deinit();
-    }
-
-    pub fn nextFrame(self: *@This()) *FrameState {
-        self.semaphore.waitUncancelable(self.io);
-        errdefer self.semaphore.post();
-        self.index = (self.index + 1) % BufferCount;
-        return &self.buffer[self.index];
-    }
-
-    pub fn releaseFrame(self: *@This()) void {
-        self.semaphore.post(self.io);
     }
 };
 

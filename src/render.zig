@@ -30,11 +30,7 @@ pub const Renderer = renderer: {
     if (!builtin.is_test) break :renderer Metal;
 
     break :renderer struct {
-        pub const Handle = struct {
-            pub fn init(_: *Handle, _: *const Renderer, _: *Window, _: Allocator, _: Io) !void {}
-
-            pub fn deinit(_: *Handle) void {}
-        };
+        const BufferCount = 1;
 
         pub fn init(_: *Renderer) !void {}
 
@@ -42,15 +38,17 @@ pub const Renderer = renderer: {
     };
 };
 
+const BufferCount = Renderer.BufferCount;
+
 //The sync path i take it from this issue: https://github.com/ocornut/imgui/issues/9500
-pub fn render(renderer: *Renderer, handle: *Renderer.Handle, frame_state: *FrameState, sync: bool) void {
+pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sync: bool) void {
     renderer.start();
     defer renderer.end();
 
     const width, const height = frame_state.uniforms.viewport_size;
 
-    handle.update(width, height, sync);
-    var target = handle.target();
+    var target = handle.context.target(width, height, sync);
+
     var frame = renderer.frame(handle);
     defer frame.complete(&target, sync);
 
@@ -84,6 +82,70 @@ pub fn render(renderer: *Renderer, handle: *Renderer.Handle, frame_state: *Frame
         });
     }
 }
+
+pub const Handle = struct {
+    swap_chain: SwapChain,
+    context: Renderer.Context,
+
+    pub fn init(self: *@This(), renderer: *Renderer, window: *Window, gpa: Allocator, io: Io) !void {
+        self.* = .{ .swap_chain = undefined, .context = undefined };
+
+        try self.swap_chain.init(gpa, io);
+        errdefer self.swap_chain.deinit();
+
+        try self.context.init(renderer, window);
+        errdefer self.context.deinit();
+    }
+
+    pub fn nextFrame(self: *Handle) *FrameState {
+        const next = self.swap_chain.nextFrame();
+        next.reset();
+        return next;
+    }
+
+    pub fn releaseFrame(self: *Handle) void {
+        self.swap_chain.releaseFrame();
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.context.deinit();
+        self.swap_chain.deinit();
+    }
+};
+
+pub const SwapChain = struct {
+    io: Io,
+    buffer: [BufferCount]FrameState,
+    index: std.math.IntFittingRange(0, BufferCount) = 0,
+    semaphore: std.Io.Semaphore = .{ .permits = BufferCount },
+
+    pub fn init(self: *@This(), gpa: Allocator, io: Io) !void {
+        self.* = .{
+            .io = io,
+            .buffer = undefined,
+        };
+
+        for (&self.buffer) |*frame_state| {
+            try frame_state.init(gpa);
+        }
+    }
+
+    pub fn deinit(self: *@This()) void {
+        for (0..BufferCount) |_| self.semaphore.waitUncancelable(self.io);
+        for (&self.buffer) |*frame_state| frame_state.deinit();
+    }
+
+    pub fn nextFrame(self: *@This()) *FrameState {
+        self.semaphore.waitUncancelable(self.io);
+        errdefer self.semaphore.post();
+        self.index = (self.index + 1) % BufferCount;
+        return &self.buffer[self.index];
+    }
+
+    pub fn releaseFrame(self: *@This()) void {
+        self.semaphore.post(self.io);
+    }
+};
 
 pub const Uniforms = extern struct {
     viewport_size: [2]f32 align(8),
