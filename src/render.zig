@@ -60,20 +60,12 @@ pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sy
     });
     defer pass.complete();
 
-    const uniform = renderer.buffer(
-        @ptrCast(&frame_state.uniforms),
-        PAGE_SIZE,
-        .{ .storage_mode = .shared, .cpu_cache_mode = .write_combined },
-    );
-
-    defer uniform.release();
-
     var node: ?*BufferNode = frame_state.rects.nodes.head;
     while (node) |curr| : (node = curr.next) {
         pass.step(.{
             .pipeline = renderer.shaders.pipelines.rect,
             .buffers = &.{curr.buffer.buffer},
-            .uniforms = uniform.buffer,
+            .uniforms = frame_state.uniform_buffer.buffer,
             .draw = .{
                 .vertex_count = 4,
                 .type = .triangle_strip,
@@ -90,7 +82,7 @@ pub const Handle = struct {
     pub fn init(self: *@This(), renderer: *Renderer, window: *Window, gpa: Allocator, io: Io) !void {
         self.* = .{ .swap_chain = undefined, .context = undefined };
 
-        try self.swap_chain.init(gpa, io);
+        try self.swap_chain.init(renderer, gpa, io);
         errdefer self.swap_chain.deinit();
 
         try self.context.init(renderer, window);
@@ -119,14 +111,14 @@ pub const SwapChain = struct {
     index: std.math.IntFittingRange(0, BufferCount) = 0,
     semaphore: std.Io.Semaphore = .{ .permits = BufferCount },
 
-    pub fn init(self: *@This(), gpa: Allocator, io: Io) !void {
+    pub fn init(self: *@This(), renderer: *Renderer, gpa: Allocator, io: Io) !void {
         self.* = .{
             .io = io,
             .buffer = undefined,
         };
 
         for (&self.buffer) |*frame_state| {
-            try frame_state.init(gpa);
+            try frame_state.init(renderer, gpa);
         }
     }
 
@@ -176,14 +168,21 @@ pub const FrameState = struct {
     rects: BufferList,
 
     uniforms: Uniforms align(PAGE_SIZE),
+    uniform_buffer: Renderer.Buffer,
 
-    pub fn init(self: *FrameState, gpa: Allocator) !void {
+    pub fn init(self: *FrameState, renderer: *Renderer, gpa: Allocator) !void {
         self.* = .{
+            .uniform_buffer = undefined,
             .arena = .init(gpa),
             .uniforms = undefined,
             .free_rects = .empty,
             .rects = .empty,
         };
+        self.uniform_buffer = renderer.buffer(
+            @ptrCast(&self.uniforms),
+            PAGE_SIZE,
+            .{ .storage_mode = .shared, .cpu_cache_mode = .write_combined },
+        );
     }
 
     pub fn rect(self: *FrameState, renderer: *Renderer, data: Rect) !void {
@@ -218,6 +217,7 @@ pub const FrameState = struct {
     }
 
     pub fn deinit(self: *FrameState) void {
+        self.uniform_buffer.release();
         self.rects.deinit();
         self.free_rects.deinit();
         self.arena.deinit();
