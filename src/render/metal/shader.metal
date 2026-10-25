@@ -17,6 +17,7 @@ struct RectOutput {
     float4  position            [[position]];
     float4  color;
     float2  sdf_pos;
+    float2  src_pos;
     float2  half_size           [[flat]];
     float   radius              [[flat]];
     float   border_thickness    [[flat]];
@@ -36,6 +37,7 @@ float rect_sdf(float2 pos, float2 base, float rad)
 vertex RectOutput rectVertexShader(
     uint v_id [[vertex_id]],
     RectInput in [[stage_in]],
+    texture2d<float> texture[[texture(0)]],
     constant Uniforms& uniforms [[buffer(1)]]
 ) {
     float4x2 vertices = float4x2(float2(1.0f, 1.0f), float2(1.0f, -1.0f), float2(-1.0f, 1.0f), float2(-1.0f, -1.0f));
@@ -43,6 +45,11 @@ vertex RectOutput rectVertexShader(
     float2 half_size = (in.position.zw - in.position.xy) / 2.0f;
     float2 center    = (in.position.zw + in.position.xy) / 2.0f;
     float2 position  = vertices[v_id] * half_size + center;
+
+    float2 src_half_size = (in.src_position.zw - in.src_position.xy) / 2.0f;
+    float2 src_center    = (in.src_position.zw + in.src_position.xy) / 2.0f;
+    float2 src_position  = vertices[v_id] * src_half_size + src_center;
+    float2 texture_size = float2( float(texture.get_width(0)), float(texture.get_height(0)) );
 
     float4x4 colors = float4x4(in.color_0, in.color_1, in.color_2, in.color_3);
 
@@ -53,6 +60,7 @@ vertex RectOutput rectVertexShader(
         0.0f,
         1.0f
     );
+    out.src_pos = src_position / texture_size;
     out.border_thickness = in.style.x;
     out.softness = in.style.y;
     out.omit_src = in.style.z;
@@ -63,7 +71,23 @@ vertex RectOutput rectVertexShader(
     return out;
 }
 
-fragment float4 rectFragmentShader(RectOutput in [[stage_in]]) {
+fragment float4 rectFragmentShader(
+    RectOutput in [[stage_in]],
+    texture2d<float> texture [[texture(0)]]
+) {
+    constexpr sampler textureSampler(
+        coord::normalized,
+        address::clamp_to_edge,
+        filter::linear
+    );
+
+    float dim = 1.0f;
+
+    if(in.omit_src < 1.0f)
+    {
+        dim = texture.sample(textureSampler, in.src_pos).r;
+    }
+
     float border_sdf_t = 1.0f;
     if(in.border_thickness > 0.0f) {
         float border_sdf_s = rect_sdf(in.sdf_pos, in.half_size - float2(in.softness * 2.0f, in.softness * 2.0f) - in.border_thickness, max(in.radius - in.border_thickness, 0.0f));
@@ -82,6 +106,7 @@ fragment float4 rectFragmentShader(RectOutput in [[stage_in]]) {
     }
 
     float4 color = in.color;
+    color.a *= dim;
     color.a *= border_sdf_t;
     color.a *=  corner_sdf_t;
     color.rgb *= color.a;

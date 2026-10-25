@@ -83,7 +83,7 @@ pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sy
 
 pub fn syncTexture(
     renderer: *Renderer,
-    texture: *const Texture,
+    texture: *Texture,
     width: usize,
     height: usize,
     data: ?[]const u8,
@@ -93,7 +93,7 @@ pub fn syncTexture(
         texture.*.deinit();
 
         // Reallocate
-        texture.* = try renderer.texture(width, height, data);
+        texture.* = try renderer.texture(width, height, null);
     }
 
     if (data) |d| {

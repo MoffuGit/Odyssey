@@ -21,12 +21,12 @@ const Atlas = @This();
 
 arena: heap.ArenaAllocator,
 buffer: []u8,
-width: u64,
-height: u64,
+width: u32,
+height: u32,
 regions: DoublyLinkedList(RegionNode),
 free: DoublyLinkedList(RegionNode),
 
-pub fn init(self: *Atlas, w: u64, h: u64, gpa: Allocator) !void {
+pub fn init(self: *Atlas, w: u32, h: u32, gpa: Allocator) !void {
     self.* = .{
         .width = w,
         .height = h,
@@ -55,7 +55,7 @@ pub fn init(self: *Atlas, w: u64, h: u64, gpa: Allocator) !void {
     self.regions.append(free);
 }
 
-pub fn reserve(self: *Atlas, width: u64, height: u64) !Region {
+pub fn reserve(self: *Atlas, width: u32, height: u32) !Region {
     var region: Region = undefined;
 
     const best = bkl: {
@@ -159,9 +159,7 @@ pub fn reserve(self: *Atlas, width: u64, height: u64) !Region {
 }
 
 pub fn set(self: *Atlas, region: Region, data: []const u8) void {
-    var idx: u64 = 0;
-
-    while (idx < region.height) : (idx += 1) {
+    for (0..region.height) |idx| {
         const tex_offset = ((region.y + idx) * self.width) + region.x;
         const data_offset = idx * region.width;
         @memmove(
@@ -176,10 +174,10 @@ pub fn deinit(self: *Atlas) void {
 }
 
 const Region = struct {
-    x: u64,
-    y: u64,
-    width: u64,
-    height: u64,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
 };
 
 const RegionNode = struct {

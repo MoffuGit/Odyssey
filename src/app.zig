@@ -76,6 +76,7 @@ pub fn deinit(self: *App) void {
     self.renderer.deinit();
     self.core.deinit();
     self.arena.deinit();
+    self.font_manager.deinit();
     win.deinit();
 }
 
@@ -215,7 +216,7 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             view.size(.{ .fixed = 100.0 });
             view.rounded(12.0);
             view.background(.{ 1.0, 0.647, 0.0, 1.0 });
-            view.border(2, .{ 0.0, 0.0, 0.0, 1.0 });
+            view.border(2, .{ 1.0, 0.0, 0.0, 1.0 });
 
             if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
 
@@ -231,7 +232,6 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
     }
 
     {
-        const font_manager = app.font_manager;
         const frame = ws.handle.nextFrame();
         errdefer ws.handle.releaseFrame();
 
@@ -239,47 +239,9 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             .viewport_size = try ws.win.size(),
         };
 
-        if (font_manager.atlas_gen != frame.atlas_gen) {
-            const atlas = font_manager.atlas;
-
-            try render.syncTexture(
-                &app.renderer,
-                frame.atlas_texture,
-                atlas.width,
-                atlas.height,
-                atlas.data,
-            );
-        }
-
         var node = ws.view.root;
         while (node) |box| : (node = box.nextPre()) {
-            var rect = box.rect[0] ++ box.rect[1];
-
-            if (box.flags.border) {
-                const thickness = box.thickness;
-                var radius = box.radius;
-                for (0..radius.len) |idx| {
-                    radius[idx] += thickness;
-                }
-
-                try frame.rect(&app.renderer, .{
-                    .position = rect,
-                    .src_position = undefined,
-                    .color_0 = box.border,
-                    .color_1 = box.border,
-                    .color_2 = box.border,
-                    .color_3 = box.border,
-                    .corner_rads = radius,
-                    .style = .{
-                        .border_thickness = thickness,
-                    },
-                });
-
-                rect[0] += thickness;
-                rect[1] += thickness;
-                rect[2] -= thickness;
-                rect[3] -= thickness;
-            }
+            const rect = box.rect[0] ++ box.rect[1];
 
             if (box.flags.background) {
                 try frame.rect(&app.renderer, .{
@@ -291,6 +253,21 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
                     .color_3 = box.color,
                     .corner_rads = box.radius,
                     .style = .{},
+                });
+            }
+
+            if (box.flags.border) {
+                try frame.rect(&app.renderer, .{
+                    .position = rect,
+                    .src_position = undefined,
+                    .color_0 = box.border,
+                    .color_1 = box.border,
+                    .color_2 = box.border,
+                    .color_3 = box.border,
+                    .corner_rads = box.radius,
+                    .style = .{
+                        .border_thickness = box.thickness,
+                    },
                 });
             }
         }

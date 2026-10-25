@@ -31,14 +31,10 @@ pub fn deinit(self: *Manager) void {
 }
 
 pub const Glyph = struct {
-    /// width of glyph in pixels
     width: u32,
 
-    /// height of glyph in pixels
     height: u32,
 
-    /// coordinates in the atlas of the top-left corner. These have to
-    /// be normalized to be between 0 and 1 prior to use in shaders.
     atlas_x: u32,
     atlas_y: u32,
 };
