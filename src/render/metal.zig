@@ -81,9 +81,16 @@ pub fn buffer(
     self: *Metal,
     chunk: [*]u8,
     len: usize,
-    resource_options: c.MTLResourceOptions,
 ) Buffer {
-    return .init(self.device, chunk, len, resource_options);
+    return .init(
+        self.device,
+        chunk,
+        len,
+        .{
+            .storage_mode = .shared,
+            .cpu_cache_mode = .write_combined,
+        },
+    );
 }
 
 pub fn start(self: *Metal) void {

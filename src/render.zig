@@ -190,11 +190,7 @@ pub const FrameState = struct {
             .rects = .empty,
         };
 
-        self.uniform_buffer = renderer.buffer(
-            @ptrCast(&self.uniforms),
-            PAGE_SIZE,
-            .{ .storage_mode = .shared, .cpu_cache_mode = .write_combined },
-        );
+        self.uniform_buffer = renderer.buffer(@ptrCast(&self.uniforms), PAGE_SIZE);
 
         try self.atlas_texture.init(renderer.textureOptions(), 1, 1, null);
         errdefer self.atlas_texture.release();
@@ -262,14 +258,7 @@ pub const BufferNode = struct {
 
         try self.pool.init(arena, opt);
 
-        self.buffer = renderer.buffer(
-            self.pool.ptr,
-            self.pool.len,
-            .{
-                .storage_mode = .shared,
-                .cpu_cache_mode = .write_combined,
-            },
-        );
+        self.buffer = renderer.buffer(self.pool.ptr, self.pool.len);
     }
 
     pub fn deinit(self: *BufferNode) void {
