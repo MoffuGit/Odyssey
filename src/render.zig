@@ -26,6 +26,11 @@ const RECT_CAPACITY = PAGE_SIZE / std.math.gcd(PAGE_SIZE, @sizeOf(Rect));
 
 const log = std.log.scoped(.render);
 
+const BufferCount = Renderer.BufferCount;
+const Buffer = Renderer.Buffer;
+const Texture = Renderer.Texture;
+const Context = Renderer.Context;
+
 pub const Renderer = renderer: {
     if (!builtin.is_test) break :renderer Metal;
 
@@ -37,8 +42,6 @@ pub const Renderer = renderer: {
         pub fn deinit(_: *Renderer) void {}
     };
 };
-
-const BufferCount = Renderer.BufferCount;
 
 //The sync path i take it from this issue: https://github.com/ocornut/imgui/issues/9500
 pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sync: bool) void {
@@ -64,8 +67,11 @@ pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sy
     while (node) |curr| : (node = curr.next) {
         pass.step(.{
             .pipeline = renderer.shaders.pipelines.rect,
-            .buffers = &.{curr.buffer.buffer},
-            .uniforms = frame_state.uniform_buffer.buffer,
+            .buffers = &.{curr.buffer},
+            .uniforms = frame_state.uniform_buffer,
+            .textures = &.{
+                frame_state.atlas_texture,
+            },
             .draw = .{
                 .vertex_count = 4,
                 .type = .triangle_strip,
@@ -77,7 +83,7 @@ pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sy
 
 pub const Handle = struct {
     swap_chain: SwapChain,
-    context: Renderer.Context,
+    context: Context,
 
     pub fn init(self: *@This(), renderer: *Renderer, window: *Window, gpa: Allocator, io: Io) !void {
         self.* = .{ .swap_chain = undefined, .context = undefined };
@@ -168,21 +174,30 @@ pub const FrameState = struct {
     rects: BufferList,
 
     uniforms: Uniforms align(PAGE_SIZE),
-    uniform_buffer: Renderer.Buffer,
+    uniform_buffer: Buffer,
+
+    atlas_texture: Texture,
+    atlas_gen: usize,
 
     pub fn init(self: *FrameState, renderer: *Renderer, gpa: Allocator) !void {
         self.* = .{
+            .atlas_texture = undefined,
+            .atlas_gen = 0,
             .uniform_buffer = undefined,
             .arena = .init(gpa),
             .uniforms = undefined,
             .free_rects = .empty,
             .rects = .empty,
         };
+
         self.uniform_buffer = renderer.buffer(
             @ptrCast(&self.uniforms),
             PAGE_SIZE,
             .{ .storage_mode = .shared, .cpu_cache_mode = .write_combined },
         );
+
+        try self.atlas_texture.init(renderer.textureOptions(), 1, 1, null);
+        errdefer self.atlas_texture.release();
     }
 
     pub fn rect(self: *FrameState, renderer: *Renderer, data: Rect) !void {
@@ -217,6 +232,7 @@ pub const FrameState = struct {
     }
 
     pub fn deinit(self: *FrameState) void {
+        self.atlas_texture.release();
         self.uniform_buffer.release();
         self.rects.deinit();
         self.free_rects.deinit();
@@ -234,7 +250,7 @@ pub const FrameState = struct {
 
 pub const BufferNode = struct {
     next: ?*BufferNode,
-    buffer: Renderer.Buffer,
+    buffer: Buffer,
     pool: ChunkPool,
 
     pub fn init(self: *BufferNode, renderer: *Renderer, opt: chunk_pool.Options, arena: Allocator) !void {

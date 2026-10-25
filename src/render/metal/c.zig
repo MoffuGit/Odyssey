@@ -317,6 +317,31 @@ pub const MTLBlendOperation = enum(c_ulong) {
     max = 4,
 };
 
+/// https://developer.apple.com/documentation/metal/mtltextureusage?language=objc
+pub const MTLTextureUsage = packed struct(c_ulong) {
+    /// https://developer.apple.com/documentation/metal/mtltextureusage/shaderread?language=objc
+    shader_read: bool = false, // TextureUsageShaderRead = 1,
+
+    /// https://developer.apple.com/documentation/metal/mtltextureusage/shaderwrite?language=objc
+    shader_write: bool = false, // TextureUsageShaderWrite = 2,
+
+    /// https://developer.apple.com/documentation/metal/mtltextureusage/rendertarget?language=objc
+    render_target: bool = false, // TextureUsageRenderTarget = 4,
+
+    _reserved: u1 = 0, // The enum skips from 4 to 16, 8 has no documented use.
+
+    /// https://developer.apple.com/documentation/metal/mtltextureusage/pixelformatview?language=objc
+    pixel_format_view: bool = false, // TextureUsagePixelFormatView = 16,
+
+    /// https://developer.apple.com/documentation/metal/mtltextureusage/shaderatomic?language=objc
+    shader_atomic: bool = false, // TextureUsageShaderAtomic = 32,
+
+    __reserved: @Int(.unsigned, @bitSizeOf(c_ulong) - 6) = 0,
+
+    /// https://developer.apple.com/documentation/metal/mtltextureusage/unknown?language=objc
+    const unknown: MTLTextureUsage = @bitCast(0); // TextureUsageUnknown = 0,
+};
+
 /// https://developer.apple.com/documentation/metal/mtlbarrierscope?language=objc
 pub const MTLBarrierScope = enum(c_ulong) {
     buffers = 1,

@@ -101,6 +101,20 @@ pub fn frame(self: *Metal, handle: *Handle) Frame {
     return .begin(self, handle);
 }
 
+pub fn textureOptions(self: *Metal) Texture.Options {
+    return .{
+        .device = self.device,
+        .pixel_format = .r8unorm,
+        .resource_options = .{
+            .cpu_cache_mode = .write_combined,
+            .storage_mode = .shared,
+        },
+        .usage = .{
+            .shader_read = true,
+        },
+    };
+}
+
 pub const Context = struct {
     layer: objc.Object,
 
@@ -170,6 +184,191 @@ pub const Target = struct {
         const texture = drawable.msgSend(objc.Object, "texture", .{});
 
         return .{ .drawable = drawable, .texture = texture };
+    }
+};
+
+pub const Texture = struct {
+    pub const Options = struct {
+        /// MTLDevice
+        device: objc.Object,
+        pixel_format: c.MTLPixelFormat,
+        resource_options: c.MTLResourceOptions,
+        usage: c.MTLTextureUsage,
+    };
+
+    /// The underlying MTLTexture Object.
+    texture: objc.Object,
+
+    /// The width of this texture.
+    width: usize,
+    /// The height of this texture.
+    height: usize,
+
+    /// Bytes per pixel for this texture.
+    bpp: usize,
+
+    /// Initialize a texture
+    pub fn init(
+        self: *Texture,
+        opts: Options,
+        width: usize,
+        height: usize,
+        data: ?[]const u8,
+    ) !void {
+        // Create our descriptor
+        const desc = init: {
+            const Class = objc.getClass("MTLTextureDescriptor").?;
+            const id_alloc = Class.msgSend(objc.Object, objc.sel("alloc"), .{});
+            const id_init = id_alloc.msgSend(objc.Object, objc.sel("init"), .{});
+            break :init id_init;
+        };
+        defer desc.release();
+
+        // Set our properties
+        desc.setProperty("pixelFormat", @backingInt(opts.pixel_format));
+        desc.setProperty("width", @as(c_ulong, width));
+        desc.setProperty("height", @as(c_ulong, height));
+        desc.setProperty("resourceOptions", opts.resource_options);
+        desc.setProperty("usage", opts.usage);
+
+        // Initialize
+        const id = opts.device.msgSend(
+            ?*anyopaque,
+            objc.sel("newTextureWithDescriptor:"),
+            .{desc},
+        ) orelse return error.MetalFailed;
+
+        self.* = .{
+            .texture = objc.Object.fromId(id),
+            .width = width,
+            .height = height,
+            .bpp = bppOf(opts.pixel_format),
+        };
+
+        // If we have data, we set it here.
+        if (data) |d| {
+            assert(d.len == width * height * self.bpp);
+            try self.replaceRegion(0, 0, width, height, d);
+        }
+    }
+
+    pub fn release(self: *Texture) void {
+        self.texture.release();
+    }
+
+    /// Replace a region of the texture with the provided data.
+    ///
+    /// Does NOT check the dimensions of the data to ensure correctness.
+    pub fn replaceRegion(
+        self: *Texture,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        data: []const u8,
+    ) !void {
+        self.texture.msgSend(
+            void,
+            objc.sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"),
+            .{
+                c.MTLRegion{
+                    .origin = .{ .x = x, .y = y, .z = 0 },
+                    .size = .{
+                        .width = @intCast(width),
+                        .height = @intCast(height),
+                        .depth = 1,
+                    },
+                },
+                @as(c_ulong, 0),
+                @as(*const anyopaque, data.ptr),
+                @as(c_ulong, self.bpp * width),
+            },
+        );
+    }
+
+    /// Returns the bytes per pixel for the provided pixel format
+    fn bppOf(pixel_format: c.MTLPixelFormat) usize {
+        return switch (pixel_format) {
+            // Invalid
+            .invalid => @panic("invalid pixel format"),
+
+            // Weird formats I was too lazy to get the sizes of
+            else => @panic("pixel format size unknown (unlikely that this format was actually used, could be memory corruption)"),
+
+            // 8-bit pixel formats
+            .a8unorm,
+            .r8unorm,
+            .r8unorm_srgb,
+            .r8snorm,
+            .r8uint,
+            .r8sint,
+            .rg8unorm,
+            .rg8unorm_srgb,
+            .rg8snorm,
+            .rg8uint,
+            .rg8sint,
+            .stencil8,
+            => 1,
+
+            // 16-bit pixel formats
+            .r16unorm,
+            .r16snorm,
+            .r16uint,
+            .r16sint,
+            .r16float,
+            .rg16unorm,
+            .rg16snorm,
+            .rg16uint,
+            .rg16sint,
+            .rg16float,
+            .b5g6r5unorm,
+            .a1bgr5unorm,
+            .abgr4unorm,
+            .bgr5a1unorm,
+            .depth16unorm,
+            => 2,
+
+            // 32-bit pixel formats
+            .rgba8unorm,
+            .rgba8unorm_srgb,
+            .rgba8snorm,
+            .rgba8uint,
+            .rgba8sint,
+            .bgra8unorm,
+            .bgra8unorm_srgb,
+            .rgb10a2unorm,
+            .rgb10a2uint,
+            .rg11b10float,
+            .rgb9e5float,
+            .bgr10a2unorm,
+            .bgr10_xr,
+            .bgr10_xr_srgb,
+            .r32uint,
+            .r32sint,
+            .r32float,
+            .depth32float,
+            .depth24unorm_stencil8,
+            => 4,
+
+            // 64-bit pixel formats
+            .rg32uint,
+            .rg32sint,
+            .rg32float,
+            .rgba16unorm,
+            .rgba16snorm,
+            .rgba16uint,
+            .rgba16sint,
+            .rgba16float,
+            .bgra10_xr,
+            .bgra10_xr_srgb,
+            => 8,
+
+            // 128-bit pixel formats,
+            .rgba32uint,
+            .rgba32sint,
+            .rgba32float,
+            => 128,
+        };
     }
 };
 
@@ -265,9 +464,11 @@ pub const RenderPass = struct {
     pub const Step = struct {
         pipeline: Pipeline,
         /// MTLBuffer
-        uniforms: ?objc.Object = null,
+        uniforms: ?Buffer = null,
         /// MTLBuffer
-        buffers: []const ?objc.Object = &.{},
+        buffers: []const ?Buffer = &.{},
+        textures: []const ?Texture = &.{},
+
         draw: Draw,
 
         /// Describes the draw call for this step.
@@ -362,12 +563,12 @@ pub const RenderPass = struct {
                 self.encoder.msgSend(
                     void,
                     objc.sel("setVertexBuffer:offset:atIndex:"),
-                    .{ buf.value, @as(c_ulong, 0), @as(c_ulong, 0) },
+                    .{ buf.buffer.value, @as(c_ulong, 0), @as(c_ulong, 0) },
                 );
                 self.encoder.msgSend(
                     void,
                     objc.sel("setFragmentBuffer:offset:atIndex:"),
-                    .{ buf.value, @as(c_ulong, 0), @as(c_ulong, 0) },
+                    .{ buf.buffer.value, @as(c_ulong, 0), @as(c_ulong, 0) },
                 );
             }
 
@@ -386,12 +587,12 @@ pub const RenderPass = struct {
                 self.encoder.msgSend(
                     void,
                     objc.sel("setVertexBuffer:offset:atIndex:"),
-                    .{ buf.value, @as(c_ulong, 0), @as(c_ulong, i) },
+                    .{ buf.buffer.value, @as(c_ulong, 0), @as(c_ulong, i) },
                 );
                 self.encoder.msgSend(
                     void,
                     objc.sel("setFragmentBuffer:offset:atIndex:"),
-                    .{ buf.value, @as(c_ulong, 0), @as(c_ulong, i) },
+                    .{ buf.buffer.value, @as(c_ulong, 0), @as(c_ulong, i) },
                 );
             };
         }
@@ -401,14 +602,28 @@ pub const RenderPass = struct {
             self.encoder.msgSend(
                 void,
                 objc.sel("setVertexBuffer:offset:atIndex:"),
-                .{ buf.value, @as(c_ulong, 0), @as(c_ulong, 1) },
+                .{ buf.buffer.value, @as(c_ulong, 0), @as(c_ulong, 1) },
             );
             self.encoder.msgSend(
                 void,
                 objc.sel("setFragmentBuffer:offset:atIndex:"),
-                .{ buf.value, @as(c_ulong, 0), @as(c_ulong, 1) },
+                .{ buf.buffer.value, @as(c_ulong, 0), @as(c_ulong, 1) },
             );
         }
+
+        // Set textures.
+        for (s.textures, 0..) |t, i| if (t) |tex| {
+            self.encoder.msgSend(
+                void,
+                objc.sel("setVertexTexture:atIndex:"),
+                .{ tex.texture.value, @as(c_ulong, i) },
+            );
+            self.encoder.msgSend(
+                void,
+                objc.sel("setFragmentTexture:atIndex:"),
+                .{ tex.texture.value, @as(c_ulong, i) },
+            );
+        };
 
         self.encoder.msgSend(
             void,
