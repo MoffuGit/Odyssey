@@ -81,6 +81,26 @@ pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sy
     }
 }
 
+pub fn syncTexture(
+    renderer: *Renderer,
+    texture: *const Texture,
+    width: usize,
+    height: usize,
+    data: ?[]const u8,
+) !void {
+    if (width > texture.width or height > texture.height) {
+        // Free our old texture
+        texture.*.deinit();
+
+        // Reallocate
+        texture.* = try renderer.texture(width, height, data);
+    }
+
+    if (data) |d| {
+        try texture.replaceRegion(0, 0, width, height, d);
+    }
+}
+
 pub const Handle = struct {
     swap_chain: SwapChain,
     context: Context,
@@ -144,48 +164,6 @@ pub const SwapChain = struct {
         self.semaphore.post(self.io);
     }
 };
-
-pub const Uniforms = extern struct {
-    viewport_size: [2]f32 align(8),
-};
-
-pub const Rect = extern struct {
-    position: [4]f32 align(16),
-    src_position: [4]f32 align(16),
-    color_0: [4]f32 align(16),
-    color_1: [4]f32 align(16),
-    color_2: [4]f32 align(16),
-    color_3: [4]f32 align(16),
-    corner_rads: [4]f32 align(16),
-    style: Style align(16),
-};
-
-pub const Style = packed struct(u128) {
-    border_thickness: f32 = 0.0,
-    softness: f32 = 1.0,
-    omit_src: f32 = 1.0,
-    _padding: f32 = 0.0,
-};
-
-pub fn syncTexture(
-    renderer: *Renderer,
-    texture: *const Texture,
-    width: usize,
-    height: usize,
-    data: ?[]const u8,
-) !void {
-    if (width > texture.width or height > texture.height) {
-        // Free our old texture
-        texture.*.deinit();
-
-        // Reallocate
-        texture.* = try renderer.texture(width, height, data);
-    }
-
-    if (data) |d| {
-        try texture.replaceRegion(0, 0, width, height, d);
-    }
-}
 
 pub const FrameState = struct {
     arena: heap.ArenaAllocator,
@@ -299,6 +277,28 @@ pub const BufferList = struct {
     pub fn deinit(self: *BufferList) void {
         while (self.nodes.pop()) |node| node.deinit();
     }
+};
+
+pub const Uniforms = extern struct {
+    viewport_size: [2]f32 align(8),
+};
+
+pub const Rect = extern struct {
+    position: [4]f32 align(16),
+    src_position: [4]f32 align(16),
+    color_0: [4]f32 align(16),
+    color_1: [4]f32 align(16),
+    color_2: [4]f32 align(16),
+    color_3: [4]f32 align(16),
+    corner_rads: [4]f32 align(16),
+    style: Style align(16),
+};
+
+pub const Style = packed struct(u128) {
+    border_thickness: f32 = 0.0,
+    softness: f32 = 1.0,
+    omit_src: f32 = 1.0,
+    _padding: f32 = 0.0,
 };
 
 test {
