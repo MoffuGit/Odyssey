@@ -18,7 +18,6 @@ const chunk_pool = @import("chunk_pool.zig");
 const ChunkPool = chunk_pool.ChunkPool;
 const datastruct = @import("datastruct.zig");
 const SinglyLinkedList = datastruct.SinglyLinkedList;
-const Atlas = datastruct.Atlas;
 const Metal = @import("render/metal.zig");
 const win = @import("window.zig");
 const Window = win.Window;
