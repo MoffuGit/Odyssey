@@ -182,7 +182,7 @@ pub const Buffer = struct {
         };
     }
 
-    pub fn release(self: *const Buffer) void {
+    pub fn deinit(self: *const Buffer) void {
         self.buffer.release();
     }
 };
@@ -264,7 +264,7 @@ pub const Texture = struct {
         return self;
     }
 
-    pub fn release(self: *Texture) void {
+    pub fn deinit(self: *Texture) void {
         self.texture.release();
     }
 

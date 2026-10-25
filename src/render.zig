@@ -18,6 +18,7 @@ const chunk_pool = @import("chunk_pool.zig");
 const ChunkPool = chunk_pool.ChunkPool;
 const datastruct = @import("datastruct.zig");
 const SinglyLinkedList = datastruct.SinglyLinkedList;
+const Atlas = datastruct.Atlas;
 const Metal = @import("render/metal.zig");
 const win = @import("window.zig");
 const Window = win.Window;
@@ -167,6 +168,26 @@ pub const Style = packed struct(u128) {
     _padding: f32 = 0.0,
 };
 
+pub fn syncTexture(
+    renderer: *Renderer,
+    texture: *const Texture,
+    width: usize,
+    height: usize,
+    data: ?[]const u8,
+) !void {
+    if (width > texture.width or height > texture.height) {
+        // Free our old texture
+        texture.*.deinit();
+
+        // Reallocate
+        texture.* = try renderer.texture(width, height, data);
+    }
+
+    if (data) |d| {
+        try texture.replaceRegion(0, 0, width, height, d);
+    }
+}
+
 pub const FrameState = struct {
     arena: heap.ArenaAllocator,
 
@@ -193,7 +214,7 @@ pub const FrameState = struct {
         self.uniform_buffer = renderer.buffer(@ptrCast(&self.uniforms), PAGE_SIZE);
 
         self.atlas_texture = try renderer.texture(1, 1, null);
-        errdefer self.atlas_texture.release();
+        errdefer self.atlas_texture.deinit();
     }
 
     pub fn rect(self: *FrameState, renderer: *Renderer, data: Rect) !void {
@@ -228,8 +249,8 @@ pub const FrameState = struct {
     }
 
     pub fn deinit(self: *FrameState) void {
-        self.atlas_texture.release();
-        self.uniform_buffer.release();
+        self.atlas_texture.deinit();
+        self.uniform_buffer.deinit();
         self.rects.deinit();
         self.free_rects.deinit();
         self.arena.deinit();
@@ -262,7 +283,7 @@ pub const BufferNode = struct {
     }
 
     pub fn deinit(self: *BufferNode) void {
-        self.buffer.release();
+        self.buffer.deinit();
     }
 };
 
