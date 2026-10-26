@@ -1,5 +1,7 @@
 const std = @import("std");
+
 const Translator = @import("translate_c").Translator;
+
 const MetallibStep = @import("build/MetalLibStep.zig");
 
 pub fn build(b: *std.Build) void {
@@ -13,6 +15,26 @@ pub fn build(b: *std.Build) void {
     ) orelse &[0][]const u8{};
 
     const benchmark = b.option(bool, "enable-benchmark", "Benchmark flag") orelse false;
+
+    const translate_c = b.dependency("translate_c", .{});
+
+    const rgfw = buildTranslation(
+        b,
+        translate_c,
+        target,
+        optimize,
+        "include/RGFW.c",
+        "include/RGFW.h",
+    );
+
+    const kb_text = buildTranslation(
+        b,
+        translate_c,
+        target,
+        optimize,
+        "include/kb_text_shape.c",
+        "include/kb_text_shape.h",
+    );
 
     const true_type = b.dependency("true_type", .{
         .target = target,
@@ -29,8 +51,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const rgfw = buildRgfw(b, target, optimize);
-
     const mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -42,6 +62,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "macos", .module = macos.module("macos") },
             .{ .name = "true_type", .module = true_type.module("TrueType") },
             .{ .name = "rgfw", .module = rgfw },
+            .{ .name = "kb_text", .module = kb_text },
         },
     });
 
@@ -89,25 +110,27 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 }
 
-fn buildRgfw(
+fn buildTranslation(
     b: *std.Build,
+    translate_c: *std.Build.Dependency,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    source_file: []const u8,
+    header_file: []const u8,
 ) *std.Build.Module {
-    const translate_c = b.dependency("translate_c", .{});
     const translator: Translator = .init(translate_c, .{
-        .c_source_file = b.path("include/RGFW.h"),
+        .c_source_file = b.path(header_file),
         .target = target,
         .optimize = optimize,
     });
 
-    const rgfw = translator.mod;
+    const mod = translator.mod;
 
-    rgfw.addCSourceFile(.{
-        .file = b.path("include/RGFW.c"),
+    mod.addCSourceFile(.{
+        .file = b.path(source_file),
     });
 
-    return rgfw;
+    return mod;
 }
 
 const TestPath = "test";

@@ -9,13 +9,13 @@ const Core = @import("core.zig");
 const datastruct = @import("datastruct.zig");
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const Display = @import("display.zig");
+const font = @import("font.zig");
 const render = @import("render.zig");
 const Renderer = render.Renderer;
 const Handle = render.Handle;
 const View = @import("view.zig");
 const win = @import("window.zig");
 const Window = win.Window;
-const FontManager = @import("font.zig");
 
 const log = std.log.scoped(.app);
 
@@ -29,14 +29,14 @@ core: Core,
 display: Display,
 renderer: Renderer,
 states: SinglyLinkedList(WindowState),
-font_manager: FontManager,
+font_state: font.State,
 
 pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     try win.init("Odyssey", 0);
     errdefer win.deinit();
 
     self.* = .{
-        .font_manager = undefined,
+        .font_state = undefined,
         .arena = .init(gpa),
         .chunks = undefined,
         .io = io,
@@ -47,8 +47,8 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
         .display = undefined,
     };
 
-    try self.font_manager.init(gpa);
-    errdefer self.font_manager.deinit();
+    try self.font_state.init(gpa);
+    errdefer self.font_state.deinit();
 
     const arena = self.arena.allocator();
     errdefer self.arena.deinit();
@@ -76,7 +76,7 @@ pub fn deinit(self: *App) void {
     self.renderer.deinit();
     self.core.deinit();
     self.arena.deinit();
-    self.font_manager.deinit();
+    self.font_state.deinit();
     win.deinit();
 }
 
