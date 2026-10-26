@@ -41,7 +41,7 @@ active: ?u64,
 
 events: DoublyLinkedList(Event),
 
-cache: []DoublyLinkedList(Cache),
+cache: []DoublyLinkedList(Cached),
 
 chunks: chunk_pool.ChunkAllocator,
 
@@ -74,7 +74,7 @@ pub fn init(self: *View, gpa: Allocator) !void {
         });
     }
 
-    self.cache = try arena.alloc(DoublyLinkedList(Cache), 2048);
+    self.cache = try arena.alloc(DoublyLinkedList(Cached), 2048);
     @memset(self.cache, .empty);
 
     try self.chunks.init(arena, &.{.{ .capacity = 2048, .chunk_size = @sizeOf(Block) }});
@@ -118,10 +118,10 @@ pub fn finish(self: *View) void {
     }
 
     for (self.cache) |*list| {
-        var entry: ?*Cache = list.first;
+        var entry: ?*Cached = list.first;
         while (entry) |cache| {
             entry = cache.next;
-            const cached: *Block = @fieldParentPtr("cache", cache);
+            const cached: *Block = @fieldParentPtr("cached", cache);
 
             if (cached.touched_frame != self.frame) {
                 list.remove(cache);
@@ -244,7 +244,7 @@ pub fn getBlock(self: *View, key: u64) ?*Block {
     var entry = list.first;
 
     while (entry) |cache| : (entry = cache.next) {
-        const block: *Block = @fieldParentPtr("cache", cache);
+        const block: *Block = @fieldParentPtr("cached", cache);
         if (block.key == key) {
             return block;
         }
@@ -258,7 +258,7 @@ pub fn cacheBlock(self: *View, block: *Block, key: u64) void {
 
     block.key = key;
 
-    list.append(&block.cache);
+    list.append(&block.cached);
 }
 
 const Options = struct {
@@ -495,13 +495,13 @@ fn stackFlag(field: StackField) u64 {
     return @as(u64, 1) << @backingInt(field);
 }
 
-const Cache = struct {
-    pub const _null: Cache = .{
+const Cached = struct {
+    pub const _null: Cached = .{
         .next = null,
         .prev = null,
     };
-    next: ?*Cache,
-    prev: ?*Cache,
+    next: ?*Cached,
+    prev: ?*Cached,
 };
 
 pub const Axis = enum(u1) { x = 0, y = 1 };
@@ -540,7 +540,7 @@ pub const Block = struct {
     parent: ?*Block,
 
     key: ?u64,
-    cache: Cache,
+    cached: Cached,
     touched_frame: u64,
 
     axis: Axis,
@@ -569,7 +569,7 @@ pub const Block = struct {
 
     pub const empty: Block = .{
         .rect = @splat(@splat(0.0)),
-        .cache = ._null,
+        .cached = ._null,
         .children = .empty,
         .child_count = 0,
         .next = null,
