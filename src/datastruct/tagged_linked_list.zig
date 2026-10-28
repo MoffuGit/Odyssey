@@ -10,33 +10,31 @@ pub fn TaggedLinkedList(comptime T: type) type {
             else => @compileError("expected union type, found '" ++ @typeName(T) ++ "'"),
         };
 
-        const Types = @"union".field_types;
-
-        pub const Tag = @"union".tag_type orelse
-            @compileError("TaggedLinkedList requires a tagged union");
+        pub const Field = std.meta.FieldEnum(T);
 
         pub const Lists = bkl: {
-            var field_types: [Types.len]type = undefined;
-            var field_attrs: [Types.len]std.builtin.Type.Struct.FieldAttributes = undefined;
+            var field_types: [@"union".field_types.len]type = undefined;
+            var field_attrs: [@"union".field_types.len]std.builtin.Type.Struct.FieldAttributes = undefined;
 
-            for (Types, &field_types, &field_attrs) |@"type", *Type, *attr| {
-                Type.* = SinglyLinkedList(struct {
-                    next: ?*@This() = null,
-                    value: @"type",
-                });
+            for (0..@"union".field_names.len) |i| {
+                const field: Field = @fromBackingInt(@intCast(i));
 
-                attr.* = .{ .@"align" = @alignOf(Type.*) };
+                field_types[i] = SinglyLinkedList(Node(field));
+                field_attrs[i] = .{ .@"align" = @alignOf(field_types[i]) };
             }
 
             break :bkl @Struct(.auto, null, @"union".field_names, &field_types, &field_attrs);
         };
 
-        pub fn List(comptime tag: Tag) type {
-            return @FieldType(Lists, @tagName(tag));
+        pub fn List(comptime field: Field) type {
+            return @FieldType(Lists, @tagName(field));
         }
 
-        pub fn Node(comptime tag: Tag) type {
-            return List(tag).Node;
+        pub fn Node(comptime field: Field) type {
+            return struct {
+                next: ?*@This() = null,
+                value: @FieldType(T, @tagName(field)),
+            };
         }
 
         pub const empty: @This() = bkl: {
@@ -51,20 +49,20 @@ pub fn TaggedLinkedList(comptime T: type) type {
 
         lists: Lists,
 
-        pub fn get(self: *@This(), comptime tag: Tag) *List(tag) {
-            return &@field(self.lists, @tagName(tag));
+        pub fn get(self: *@This(), comptime field: Field) *List(field) {
+            return &@field(self.lists, @tagName(field));
         }
 
-        pub fn append(self: *@This(), comptime tag: Tag, node: *Node(tag)) void {
-            self.get(tag).append(node);
+        pub fn append(self: *@This(), comptime field: Field, node: *Node(field)) void {
+            self.get(field).append(node);
         }
 
-        pub fn prepend(self: *@This(), comptime tag: Tag, node: *Node(tag)) void {
-            self.get(tag).prepend(node);
+        pub fn prepend(self: *@This(), comptime field: Field, node: *Node(field)) void {
+            self.get(field).prepend(node);
         }
 
-        pub fn pop(self: *@This(), comptime tag: Tag) ?*Node(tag) {
-            return self.get(tag).pop();
+        pub fn pop(self: *@This(), comptime field: Field) ?*Node(field) {
+            return self.get(field).pop();
         }
     };
 }

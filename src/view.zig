@@ -321,7 +321,7 @@ pub fn blkEnd(self: *View) void {
 }
 
 fn blkComplete(self: *View, block: *Block) void {
-    inline for (@typeInfo(Stacks.Tag).@"enum".field_values) |value| {
+    inline for (@typeInfo(Stacks.Field).@"enum".field_values) |value| {
         const flag = @as(u64, 1) << value;
         if (self.pop_flags & flag != 0) {
             self.pop_flags &= ~flag;
@@ -489,7 +489,7 @@ pub const Attribute = union(enum) {
 
 const Stacks = TaggedLinkedList(Attribute);
 pub const Node = Stacks.Node;
-pub const StackField = Stacks.Tag;
+pub const StackField = Stacks.Field;
 
 fn stackFlag(field: StackField) u64 {
     return @as(u64, 1) << @backingInt(field);
