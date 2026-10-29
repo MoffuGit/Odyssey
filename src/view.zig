@@ -66,8 +66,8 @@ pub fn init(self: *View, gpa: Allocator) !void {
     const arena = self.arena.allocator();
     errdefer self.arena.deinit();
 
-    for (&self.frame_chunks) |*pool| {
-        try pool.init(arena, &.{
+    for (&self.frame_chunks) |*chunk| {
+        try chunk.init(arena, &.{
             .{ .capacity = 2048, .chunk_size = @sizeOf(Attribute) + @sizeOf(?*Attribute) },
             .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
             .{ .capacity = 128, .chunk_size = @sizeOf(Event) },
