@@ -261,35 +261,34 @@ pub fn blk(self: *View, options: Options) *Block {
     const frame_chunks = self.frameChunks();
     const chunks = self.chunks.allocator();
 
-    var cached: ?*Block = null;
+    const cached = bkl: {
+        const key = options.key orelse break :bkl null;
 
-    if (options.key) |key| {
         if (self.cache.get(key)) |c| {
             const block: *Block = @fieldParentPtr("cached", c);
 
             if (block.touched_frame == self.frame) {
                 log.warn("Repeated block key", .{});
-            } else {
-                block.reset();
-                cached = block;
+                break :bkl null;
             }
+
+            block.reset();
+            break :bkl block;
         } else {
             const block = chunks.create(Block) catch @panic("Block Chunk Overflow");
             block.* = .empty;
             block.key = key;
 
-            cached = block;
             self.cache.put(key, &block.cached);
-        }
-    }
-
-    const block = bkl: {
-        if (cached) |c| break :bkl c else {
-            const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
-            block.* = .empty;
-
             break :bkl block;
         }
+    };
+
+    const block = if (cached) |c| c else bkl: {
+        const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
+        block.* = .empty;
+
+        break :bkl block;
     };
 
     block.build(self, options.flags);
