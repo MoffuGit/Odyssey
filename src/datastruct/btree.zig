@@ -788,7 +788,7 @@ pub fn BPlusTree(comptime K: type, comptime V: type, comptime comp: *const fn (a
             return null;
         }
 
-        pub fn iter(self: *const @This()) Iterator {
+        pub fn itereator(self: *const @This()) Iterator {
             return Iterator.init(self);
         }
 
@@ -1110,7 +1110,7 @@ pub fn BPlusSet(comptime K: type, comptime comp: *const fn (a: K, b: K) std.math
         }
 
         pub fn iter(self: *Self) Iterator {
-            return .{ .inner = self.tree.iter() };
+            return .{ .inner = self.tree.itereator() };
         }
 
         pub fn range(self: *Self, start: K, end: K) RangeIterator {
@@ -1226,7 +1226,7 @@ test "B+ Tree leaf traversal" {
         _ = try tree.insert(alloc, key, key + 100);
     }
 
-    var iter = tree.iter();
+    var iter = tree.itereator();
     var expected_key: usize = 0;
     while (iter.next()) |n| {
         try testing.expectEqual(expected_key, n.key);

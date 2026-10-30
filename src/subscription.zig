@@ -93,7 +93,7 @@ pub fn Subscriptions(
         }
 
         pub fn deinit(self: *@This()) void {
-            var outer = self.subscribers.iter();
+            var outer = self.subscribers.itereator();
             while (outer.next_mut()) |entry| {
                 const subscribers = entry.value;
                 subscribers.deinit(self.chunk);
@@ -142,7 +142,7 @@ pub fn Subscriptions(
         pub fn notifyAll(self: *@This(), key: Key, args: Args) void {
             const subscribers = self.subscribers.get_mut(key) orelse return;
 
-            var iter = subscribers.iter();
+            var iter = subscribers.itereator();
             while (iter.next()) |entry| {
                 if (entry.value.active and !entry.value.callback(entry.value, args)) {
                     _ = self.dropped.insert(self.chunk, .{ .key = key, .id = entry.key }) catch |err| {
