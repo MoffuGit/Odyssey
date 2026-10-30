@@ -11,6 +11,7 @@ const Wyhash = std.hash.Wyhash;
 
 const chunk_pool = @import("chunk_pool.zig");
 const datastruct = @import("datastruct.zig");
+const Map = datastruct.Map;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 const TaggedLinkedList = datastruct.TaggedLinkedList;
 const rng2 = @import("math.zig").rng2;
@@ -41,7 +42,20 @@ active: ?u64,
 
 events: DoublyLinkedList(Event),
 
-cache: []DoublyLinkedList(Cached),
+cache: Map(
+    u64,
+    Cached,
+    struct {
+        pub fn hash(_: @This(), k: u64) u64 {
+            return k;
+        }
+
+        pub fn eql(_: @This(), k: u64, cached: *Cached) bool {
+            const block: *Block = @fieldParentPtr("cached", cached);
+            return k == block.key;
+        }
+    },
+),
 
 chunks: chunk_pool.ChunkAllocator,
 
@@ -74,10 +88,8 @@ pub fn init(self: *View, gpa: Allocator) !void {
         });
     }
 
-    self.cache = try arena.alloc(DoublyLinkedList(Cached), 2048);
-    @memset(self.cache, .empty);
-
     try self.chunks.init(arena, &.{.{ .capacity = 2048, .chunk_size = @sizeOf(Block) }});
+    try self.cache.init(2048, .{}, arena);
 }
 
 pub fn deinit(self: *View) void {
@@ -111,21 +123,22 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
 }
 
 pub fn finish(self: *View) void {
+    const chunks = self.chunks.allocator();
     const root = self.root orelse unreachable;
 
     inline for (0..2) |axis| {
         root.layout(axis);
     }
 
-    for (self.cache) |*list| {
-        var entry: ?*Cached = list.first;
-        while (entry) |cache| {
-            entry = cache.next;
-            const cached: *Block = @fieldParentPtr("cached", cache);
+    for (self.cache.table) |*slot| {
+        var entry: ?*Cached = slot.first;
+        while (entry) |cached| {
+            entry = cached.next;
+            const block: *Block = @fieldParentPtr("cached", cached);
 
-            if (cached.touched_frame != self.frame) {
-                list.remove(cache);
-                self.chunks.allocator().destroy(cached);
+            if (block.touched_frame != self.frame) {
+                slot.remove(cached);
+                chunks.destroy(block);
             }
         }
     }
@@ -239,28 +252,6 @@ pub fn blkStr(self: *View, str: []const u8, flags: Block.Flags) *Block {
     return self.blk(.{ .flags = flags, .key = key });
 }
 
-pub fn getBlock(self: *View, key: u64) ?*Block {
-    const list = &self.cache[key % self.cache.len];
-    var entry = list.first;
-
-    while (entry) |cache| : (entry = cache.next) {
-        const block: *Block = @fieldParentPtr("cached", cache);
-        if (block.key == key) {
-            return block;
-        }
-    }
-
-    return null;
-}
-
-pub fn cacheBlock(self: *View, block: *Block, key: u64) void {
-    const list = &self.cache[key % self.cache.len];
-
-    block.key = key;
-
-    list.append(&block.cached);
-}
-
 const Options = struct {
     flags: Block.Flags = .{},
     key: ?u64 = null,
@@ -270,30 +261,30 @@ pub fn blk(self: *View, options: Options) *Block {
     const frame_chunks = self.frameChunks();
     const chunks = self.chunks.allocator();
 
-    const block = bkl: {
-        if (options.key) |key| {
-            if (self.getBlock(key)) |cached| {
-                if (cached.touched_frame == self.frame) {
-                    log.warn("Repeated block key", .{});
+    var cached: ?*Block = null;
 
-                    const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
-                    block.* = .empty;
+    if (options.key) |key| {
+        if (self.cache.get(key)) |c| {
+            const block: *Block = @fieldParentPtr("cached", c);
 
-                    break :bkl block;
-                }
-
-                cached.reset();
-
-                break :bkl cached;
+            if (block.touched_frame == self.frame) {
+                log.warn("Repeated block key", .{});
             } else {
-                const block = chunks.create(Block) catch @panic("Block Chunk Overflow");
-                block.* = .empty;
-
-                self.cacheBlock(block, key);
-
-                break :bkl block;
+                block.reset();
+                cached = block;
             }
         } else {
+            const block = chunks.create(Block) catch @panic("Block Chunk Overflow");
+            block.* = .empty;
+            block.key = key;
+
+            cached = block;
+            self.cache.put(key, &block.cached);
+        }
+    }
+
+    const block = bkl: {
+        if (cached) |c| break :bkl c else {
             const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
             block.* = .empty;
 
