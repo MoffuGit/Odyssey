@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const DoublyLinkedList = @import("doubly_linked_list.zig").DoublyLinkedList;
 
-pub fn Map(
+pub fn HashMap(
     comptime K: type,
     comptime V: type,
     comptime Context: type,

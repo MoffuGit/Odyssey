@@ -7,8 +7,8 @@ pub const DoublyLinkedList = doubly_linked_list.DoublyLinkedList;
 pub const heap = @import("datastruct/heap.zig");
 pub const linked_list = @import("datastruct/linked_list.zig");
 pub const SinglyLinkedList = linked_list.SinglyLinkedList;
-pub const map = @import("datastruct/map.zig");
-pub const Map = map.Map;
+pub const hash_map = @import("datastruct/hash_map.zig");
+pub const HashMap = hash_map.HashMap;
 pub const mem_map = @import("datastruct/memory_map.zig");
 pub const mpsc = @import("datastruct/mpsc.zig");
 pub const MpscBounded = mpsc.MpscBounded;
@@ -21,7 +21,7 @@ pub const TaggedLinkedList = tagged_linked_list.TaggedLinkedList;
 
 test {
     _ = Atlas;
-    _ = map;
+    _ = hash_map;
     _ = mpsc;
     _ = spsc;
     _ = mem_map;

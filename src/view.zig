@@ -11,7 +11,7 @@ const Wyhash = std.hash.Wyhash;
 
 const chunk_pool = @import("chunk_pool.zig");
 const datastruct = @import("datastruct.zig");
-const Map = datastruct.Map;
+const HashMap = datastruct.HashMap;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 const TaggedLinkedList = datastruct.TaggedLinkedList;
 const rng2 = @import("math.zig").rng2;
@@ -42,7 +42,7 @@ active: ?u64,
 
 events: DoublyLinkedList(Event),
 
-cache: Map(
+cache: HashMap(
     u64,
     Cached,
     struct {
