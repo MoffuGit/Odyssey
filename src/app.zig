@@ -118,10 +118,10 @@ fn resizeCallback(event: win.Event) void {
     const window = event.win;
     const self: *App = @ptrCast(@alignCast(window.userdata()));
 
-    var curr: ?*WindowState = self.states.head;
+    var iter = self.states.iterator();
     var resized: ?*WindowState = null;
 
-    while (curr) |state| : (curr = state.next) {
+    while (iter.next()) |state| {
         if (state.win.ptr == window.ptr) {
             resized = state;
         } else {

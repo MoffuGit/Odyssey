@@ -29,8 +29,8 @@ pub const MemMap = struct {
         while (true) {
             var found = false;
             const start_vaddr = dest_vaddr;
-            var node = self.ranges.head;
-            while (node) |n| : (node = n.next) {
+            var iter = self.ranges.iterator();
+            while (iter.next()) |n| {
                 if (rng.contains(n.vaddr_range, dest_vaddr)) {
                     const src_off = dest_vaddr - n.vaddr_range[0];
                     const possible = n.vaddr_range[1] - dest_vaddr;

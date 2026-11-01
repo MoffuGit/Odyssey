@@ -63,8 +63,8 @@ pub fn render(renderer: *Renderer, handle: *Handle, frame_state: *FrameState, sy
     });
     defer pass.complete();
 
-    var node: ?*BufferNode = frame_state.rects.nodes.head;
-    while (node) |curr| : (node = curr.next) {
+    var iter = frame_state.rects.nodes.iterator();
+    while (iter.next()) |curr| {
         pass.step(.{
             .pipeline = renderer.shaders.pipelines.rect,
             .buffers = &.{curr.buffer},
@@ -234,8 +234,8 @@ pub const FrameState = struct {
     }
 
     pub fn reset(self: *FrameState) void {
-        var node = self.rects.nodes.head;
-        while (node) |curr| : (node = curr.next) curr.pool.reset();
+        var iter = self.rects.nodes.iterator();
+        while (iter.next()) |curr| curr.pool.reset();
 
         self.free_rects.nodes.concatByMoving(&self.rects.nodes);
         self.uniforms = undefined;

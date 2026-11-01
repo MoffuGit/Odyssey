@@ -56,23 +56,22 @@ pub fn new(path: []const u8, filename_offset: u32, alloc: Allocator) ChunkedPath
 }
 
 pub fn extend(
-    existing: ChunkedPath,
+    base: *const ChunkedPath,
     suffix: []const u8,
     filename_offset: u32,
     alloc: Allocator,
 ) ChunkedPath {
-    assert(existing.len > 0);
+    assert(base.len > 0);
     assert(suffix.len > 0);
 
     var new_memmap: MemMap = .{};
-    const memmap = existing.memmap;
 
-    var curr = memmap.ranges.head;
-    while (curr) |range| : (curr = range.next) {
+    var iter = base.memmap.ranges.iterator();
+    while (iter.next()) |range| {
         new_memmap.push(range.vaddr_range, range.base, alloc) catch @panic("MemMap Range Overflow");
     }
 
-    const path_len = existing.len;
+    const path_len = base.len;
     var suffix_map = new(suffix, filename_offset, alloc);
 
     while (suffix_map.memmap.ranges.pop()) |node| {
@@ -91,14 +90,12 @@ pub fn extend(
     };
 }
 
-pub fn free(self: *const ChunkedPath, alloc: Allocator) void {
-    var node = self.memmap.ranges.head;
-    while (node) |range| {
-        const next = range.next;
+pub fn free(self: *ChunkedPath, alloc: Allocator) void {
+    var iter = self.memmap.ranges.iterator();
+    while (iter.next()) |range| {
         const chunk: *Chunk = @ptrCast(@alignCast(range.base));
         alloc.destroy(chunk);
         alloc.destroy(range);
-        node = next;
     }
 }
 
@@ -119,7 +116,7 @@ pub fn slice(self: *const ChunkedPath, allocator: Allocator) ![]u8 {
     return try self.memmap.slice(.{ 0, self.len }, allocator);
 }
 
-pub fn cmp(self: ChunkedPath, other: ChunkedPath) math.Order {
+pub fn cmp(self: *const ChunkedPath, other: *const ChunkedPath) math.Order {
     if (self.len == 0 and other.len == 0) return .eq;
     if (self.len == 0) return .lt;
     if (other.len == 0) return .gt;
@@ -128,14 +125,16 @@ pub fn cmp(self: ChunkedPath, other: ChunkedPath) math.Order {
     const MaskInt = @Int(.unsigned, SIMD_CHUNK_BYTES);
     const all_ones: MaskInt = @as(MaskInt, 0) -% 1;
 
-    var node_a = self.memmap.ranges.head;
-    var node_b = other.memmap.ranges.head;
+    var iter_a = self.memmap.ranges.iterator();
+    var iter_b = other.memmap.ranges.iterator();
 
-    while (node_a != null and node_b != null) {
-        const base_a = node_a.?.base;
-        const base_b = node_b.?.base;
+    while (true) {
+        const node_a = iter_a.next() orelse break;
+        const node_b = iter_b.next() orelse break;
 
-        // Deduped chunks share the same canonical pointer — skip the load.
+        const base_a = node_a.base;
+        const base_b = node_b.base;
+
         if (base_a != base_b) {
             const chunk_a: *Chunk = @ptrCast(@alignCast(base_a));
             const chunk_b: *Chunk = @ptrCast(@alignCast(base_b));
@@ -155,9 +154,6 @@ pub fn cmp(self: ChunkedPath, other: ChunkedPath) math.Order {
                 return .gt;
             }
         }
-
-        node_a = node_a.?.next;
-        node_b = node_b.?.next;
     }
 
     return math.order(self.len, other.len);
@@ -218,8 +214,8 @@ test "multi-node path spans multiple ranges" {
     try testing.expectEqual(@as(u32, 80), cs.len);
 
     var count: usize = 0;
-    var node = cs.memmap.ranges.head;
-    while (node) |n| : (node = n.next) count += 1;
+    var iter = cs.memmap.ranges.iterator();
+    while (iter.next()) |_| count += 1;
     try testing.expectEqual(@as(usize, 5), count);
 
     const bytes = try cs.slice(gpa);
@@ -279,7 +275,7 @@ test "append short suffix to short path (merges into one chunk)" {
 
     const suffix = "/world";
     // filename_offset is relative to the suffix: "world" starts at index 1.
-    const appended = extend(cs, suffix, 1, node_alloc);
+    const appended = cs.extend(suffix, 1, node_alloc);
 
     // Original is unchanged.
     try testing.expectEqual(@as(u32, 5), cs.len);
@@ -306,7 +302,7 @@ test "append to exact-chunk-boundary path (suffix starts new chunk)" {
     const cs = new(orig, 0, node_alloc);
 
     // "foo" starts at index 1 within the suffix "/foo".
-    const appended = extend(cs, "/foo", 1, node_alloc);
+    const appended = cs.extend("/foo", 1, node_alloc);
 
     try testing.expectEqual(@as(u32, 20), appended.len);
     const new_bytes = try appended.slice(gpa);
@@ -331,7 +327,7 @@ test "append spanning multiple nodes" {
     const suffix = "/subdir/file.zig";
     const expected = orig ++ suffix;
     // "subdir/file.zig" starts at index 1 within the suffix.
-    const appended = extend(cs, suffix, 1, node_alloc);
+    const appended = cs.extend(suffix, 1, node_alloc);
 
     try testing.expectEqual(@as(u32, @intCast(expected.len)), appended.len);
     const new_bytes = try appended.slice(gpa);
@@ -363,7 +359,7 @@ test "append resolves suffix-relative filename_offset to absolute" {
     // suffix = "/module/file.zig" — filename "file.zig" starts at index 8
     // within the suffix (after "/module/").
     const suffix = "/module/file.zig";
-    const appended = extend(cs, suffix, 8, node_alloc);
+    const appended = cs.extend(suffix, 8, node_alloc);
 
     // Resolved offset should be 8 (existing.len) + 8 = 16.
     try testing.expectEqual(@as(u32, 16), appended.filename_offset);
@@ -384,8 +380,8 @@ test "cmp equal strings" {
     const cs_a = new(path, 0, node_alloc);
     const cs_b = new(path, 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.eq, cs_a.cmp(cs_b));
-    try testing.expectEqual(std.math.Order.eq, cs_b.cmp(cs_a));
+    try testing.expectEqual(std.math.Order.eq, cs_a.cmp(&cs_b));
+    try testing.expectEqual(std.math.Order.eq, cs_b.cmp(&cs_a));
 }
 
 test "cmp differs at first byte" {
@@ -398,8 +394,8 @@ test "cmp differs at first byte" {
     const cs_a = new("abc", 0, node_alloc);
     const cs_b = new("xbc", 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(cs_b));
-    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(cs_a));
+    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(&cs_b));
+    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(&cs_a));
 }
 
 test "cmp differs at last byte of first chunk" {
@@ -414,8 +410,8 @@ test "cmp differs at last byte of first chunk" {
     const cs_a = new(path_a, 0, node_alloc);
     const cs_b = new(path_b, 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(cs_b));
-    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(cs_a));
+    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(&cs_b));
+    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(&cs_a));
 }
 
 test "cmp differs in second chunk" {
@@ -431,8 +427,8 @@ test "cmp differs in second chunk" {
     const cs_a = new(path_a, 0, node_alloc);
     const cs_b = new(path_b, 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(cs_b)); // 'A' (0x41) < 'a' (0x61)
-    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(cs_a));
+    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(&cs_b)); // 'A' (0x41) < 'a' (0x61)
+    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(&cs_a));
 }
 
 test "cmp differs in second node (multi-node)" {
@@ -449,8 +445,8 @@ test "cmp differs in second node (multi-node)" {
     const cs_a = new(path_a, 0, node_alloc);
     const cs_b = new(path_b, 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(cs_b)); // 'C' (0x43) < 'c' (0x63)
-    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(cs_a));
+    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(&cs_b)); // 'C' (0x43) < 'c' (0x63)
+    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(&cs_a));
 }
 
 test "cmp prefix — shorter is less" {
@@ -463,8 +459,8 @@ test "cmp prefix — shorter is less" {
     const cs_short = new("hello", 0, node_alloc);
     const cs_long = new("hello world", 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.lt, cs_short.cmp(cs_long));
-    try testing.expectEqual(std.math.Order.gt, cs_long.cmp(cs_short));
+    try testing.expectEqual(std.math.Order.lt, cs_short.cmp(&cs_long));
+    try testing.expectEqual(std.math.Order.gt, cs_long.cmp(&cs_short));
 }
 
 test "cmp prefix across chunk boundary" {
@@ -479,8 +475,8 @@ test "cmp prefix across chunk boundary" {
     const cs_16 = new(first_chunk, 0, node_alloc);
     const cs_17 = new(first_chunk ++ "x", 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.lt, cs_16.cmp(cs_17));
-    try testing.expectEqual(std.math.Order.gt, cs_17.cmp(cs_16));
+    try testing.expectEqual(std.math.Order.lt, cs_16.cmp(&cs_17));
+    try testing.expectEqual(std.math.Order.gt, cs_17.cmp(&cs_16));
 }
 
 test "cmp partial chunk vs full chunk (padding as zero)" {
@@ -500,8 +496,8 @@ test "cmp partial chunk vs full chunk (padding as zero)" {
     const cs_short = new("hello", 0, node_alloc);
     const cs_full = new(path_with_null, 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.lt, cs_short.cmp(cs_full));
-    try testing.expectEqual(std.math.Order.gt, cs_full.cmp(cs_short));
+    try testing.expectEqual(std.math.Order.lt, cs_short.cmp(&cs_full));
+    try testing.expectEqual(std.math.Order.gt, cs_full.cmp(&cs_short));
 }
 
 test "cmp long equal paths (multi-node)" {
@@ -515,7 +511,7 @@ test "cmp long equal paths (multi-node)" {
     const cs_a = new(path, 0, node_alloc);
     const cs_b = new(path, 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.eq, cs_a.cmp(cs_b));
+    try testing.expectEqual(std.math.Order.eq, cs_a.cmp(&cs_b));
 }
 
 test "cmp max length equal" {
@@ -531,7 +527,7 @@ test "cmp max length equal" {
     const cs_a = new(path_buf[0..], 0, node_alloc);
     const cs_b = new(path_buf[0..], 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.eq, cs_a.cmp(cs_b));
+    try testing.expectEqual(std.math.Order.eq, cs_a.cmp(&cs_b));
 }
 
 test "cmp max length differ at last byte" {
@@ -553,8 +549,8 @@ test "cmp max length differ at last byte" {
     const cs_a = new(path_a[0..], 0, node_alloc);
     const cs_b = new(path_b[0..], 0, node_alloc);
 
-    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(cs_b));
-    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(cs_a));
+    try testing.expectEqual(std.math.Order.lt, cs_a.cmp(&cs_b));
+    try testing.expectEqual(std.math.Order.gt, cs_b.cmp(&cs_a));
 }
 
 test "cmp matches std.mem.order on random paths" {
@@ -601,7 +597,7 @@ test "cmp matches std.mem.order on random paths" {
             const cs_b = new(path_b, 0, node_alloc);
 
             const expected = std.mem.order(u8, path_a, path_b);
-            const actual = cs_a.cmp(cs_b);
+            const actual = cs_a.cmp(&cs_b);
 
             if (actual != expected) {
                 log.info(
@@ -680,7 +676,7 @@ test "append that fills the partial chunk exactly" {
     // Suffix of 6 bytes fills the remainder exactly.
     const suffix = "abcdef";
     // filename starts at index 0 within the suffix.
-    const appended = extend(cs, suffix, 0, node_alloc);
+    const appended = cs.extend(suffix, 0, node_alloc);
 
     try testing.expectEqual(@as(u32, 16), appended.len);
     const new_bytes = try appended.slice(gpa);

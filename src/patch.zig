@@ -72,8 +72,8 @@ pub const LineMap = struct {
 
     pub fn rngForLine(self: *const LineMap, line: u64) [2]u64 {
         var res: [2]u64 = undefined;
-        var node = self.lines.head;
-        while (node) |n| : (node = n.next) {
+        var iter = self.lines.iterator();
+        while (iter.next()) |n| {
             if (rng.contains(n.range, line)) {
                 res = n.memmap_ranges[line - n.range[0]];
                 res[0] = delta(res[0], n.delta);
@@ -89,8 +89,8 @@ pub const LineMap = struct {
         var res: u64 = 0;
 
         bkl: {
-            var node = self.lines.head;
-            while (node) |n| : (node = n.next) {
+            var iter = self.lines.iterator();
+            while (iter.next()) |n| {
                 if (rng.empty(n.range)) continue;
 
                 const dim = rng.dim(n.range);
@@ -144,9 +144,8 @@ pub const Patched = struct {
         var fixed = heap.FixedBufferAllocator.init(patched_buffer);
         const temp = fixed.allocator();
 
-        var patch_node = patch_list.list.head;
-
-        while (patch_node) |patch| : (patch_node = patch.next) {
+        var iter = patch_list.list.iterator();
+        while (iter.next()) |patch| {
             var next_memmap: MemMap = .{};
             var next_linemap: LineMap = .{};
 
@@ -154,8 +153,8 @@ pub const Patched = struct {
             const pre_range: [2]u64 = .{ 0, patch.range[0] };
             const post_range: [2]u64 = .{ patch.range[1], last_size };
 
-            var map_node = last_memmap.ranges.head;
-            while (map_node) |map| : (map_node = map.next) {
+            var map_iter = last_memmap.ranges.iterator();
+            while (map_iter.next()) |map| {
                 const range = map.vaddr_range;
                 const range_x_pre: [2]u64 = rng.intersect(pre_range, range);
                 const range_x_post: [2]u64 = rng.intersect(post_range, range);
@@ -217,8 +216,8 @@ pub const Patched = struct {
 
             replaced_lines_count += 1;
 
-            var line_node = last_linemap.lines.head;
-            while (line_node) |line| : (line_node = line.next) {
+            var line_iter = last_linemap.lines.iterator();
+            while (line_iter.next()) |line| {
                 const range = line.range;
                 const range_x_pre: [2]u64 = rng.intersect(pre_lines_range, range);
                 const range_x_post: [2]u64 = rng.intersect(post_lines_range, range);
@@ -253,10 +252,10 @@ pub const Patched = struct {
             }
 
             const affected_lines_ranges = try temp.alloc([2]u64, replaced_lines_count);
-            var range_node = replace_line_range.head;
             var affected_idx: u64 = 0;
+            var range_iter = replace_line_range.iterator();
 
-            while (range_node) |range| {
+            while (range_iter.next()) |range| {
                 var affected_range: [2]u64 = .{
                     range.range[0] + patch.range[0],
                     range.range[1] + patch.range[1],
@@ -274,7 +273,6 @@ pub const Patched = struct {
                 }
 
                 affected_lines_ranges[affected_idx] = affected_range;
-                range_node = range.next;
                 affected_idx += 1;
             }
 
@@ -295,13 +293,14 @@ pub const Patched = struct {
         var res_memmap: MemMap = .{};
         var res_linemap: LineMap = .{};
 
-        var memmap_node = last_memmap.ranges.head;
-        while (memmap_node) |map| : (memmap_node = map.next) {
+        var memmap_iter = last_memmap.ranges.iterator();
+        while (memmap_iter.next()) |map| {
             try res_memmap.push(map.vaddr_range, map.base, alloc);
         }
 
-        var linemap_node = last_linemap.lines.head;
-        while (linemap_node) |map| : (linemap_node = map.next) {
+        var linemap_iter = last_linemap.lines.iterator();
+
+        while (linemap_iter.next()) |map| {
             try res_linemap.push(
                 .{ .delta = map.delta, .range = map.range, .memmap_ranges = map.memmap_ranges },
                 alloc,

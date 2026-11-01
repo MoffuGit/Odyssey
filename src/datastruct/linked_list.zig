@@ -59,6 +59,20 @@ pub fn SinglyLinkedList(T: type) type {
         pub fn is_empty(self: *const @This()) bool {
             return self.head == null;
         }
+
+        pub const Iterator = struct {
+            curr: ?*T,
+
+            pub fn next(self: *@This()) ?*T {
+                const curr = self.curr orelse return null;
+                self.curr = curr.next;
+                return curr;
+            }
+        };
+
+        pub fn iterator(self: *const @This()) Iterator {
+            return .{ .curr = self.head };
+        }
     };
 }
 
