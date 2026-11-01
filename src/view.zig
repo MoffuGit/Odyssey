@@ -11,7 +11,7 @@ const Wyhash = std.hash.Wyhash;
 
 const chunk_pool = @import("chunk_pool.zig");
 const datastruct = @import("datastruct.zig");
-const HashMap = datastruct.HashMap;
+const HashTable = datastruct.HashTable;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 const TaggedLinkedList = datastruct.TaggedLinkedList;
 const rng2 = @import("math.zig").rng2;
@@ -42,20 +42,7 @@ active: ?u64,
 
 events: DoublyLinkedList(Event),
 
-cache: HashMap(
-    u64,
-    Cached,
-    struct {
-        pub fn hash(_: @This(), k: u64) u64 {
-            return k;
-        }
-
-        pub fn eql(_: @This(), k: u64, cached: *Cached) bool {
-            const block: *Block = @fieldParentPtr("cached", cached);
-            return k == block.key;
-        }
-    },
-),
+cache: Cache,
 
 chunks: chunk_pool.ChunkAllocator,
 
@@ -130,16 +117,14 @@ pub fn finish(self: *View) void {
         root.layout(axis);
     }
 
-    for (self.cache.table) |*slot| {
-        var entry: ?*Cached = slot.first;
-        while (entry) |cached| {
-            entry = cached.next;
-            const block: *Block = @fieldParentPtr("cached", cached);
+    var iter = self.cache.iterator();
 
-            if (block.touched_frame != self.frame) {
-                slot.remove(cached);
-                chunks.destroy(block);
-            }
+    while (iter.next()) |cached| {
+        const block: *Block = @fieldParentPtr("cached", cached);
+
+        if (block.touched_frame != self.frame) {
+            iter.remove();
+            chunks.destroy(block);
         }
     }
 
@@ -279,7 +264,7 @@ pub fn blk(self: *View, options: Options) *Block {
             block.* = .empty;
             block.key = key;
 
-            self.cache.put(key, &block.cached);
+            self.cache.insert(key, &block.cached);
             break :bkl block;
         }
     };
@@ -484,6 +469,16 @@ pub const StackField = Stacks.Field;
 fn stackFlag(field: StackField) u64 {
     return @as(u64, 1) << @backingInt(field);
 }
+
+const Cache = HashTable(
+    Cached,
+    struct {
+        pub fn eql(_: @This(), k: u64, cached: *Cached) bool {
+            const block: *Block = @fieldParentPtr("cached", cached);
+            return k == block.key;
+        }
+    },
+);
 
 const Cached = struct {
     pub const _null: Cached = .{
