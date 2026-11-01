@@ -71,10 +71,9 @@ pub fn HashTable(
             }
 
             pub fn remove(self: *@This()) void {
-                if (self.last) |entry| {
-                    self.table.slots[self.bucket_index - 1].remove(entry);
-                    self.last = null;
-                }
+                const last = self.last orelse @panic("Double remove on hash iterator");
+                self.table.slots[self.bucket_index - 1].remove(last);
+                self.last = null;
             }
         };
 
