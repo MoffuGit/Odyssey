@@ -223,7 +223,7 @@ const Font = struct {
 
         if (kb.kbts_FontIsValid(&self.kbf) != 1) return;
 
-        self.kbf.UserData;
+        self.kbf.UserData = self;
         self.status = .loaded;
     }
 

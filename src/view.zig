@@ -460,6 +460,7 @@ pub const Attribute = union(enum) {
     border: [4]f32,
     thickness: f32,
     padding: struct { Sizing, f32 },
+    font_size: f32,
 };
 
 const Stacks = TaggedLinkedList(Attribute);
@@ -540,6 +541,7 @@ pub const Block = struct {
     thickness: f32,
     flags: Flags,
     radius: [4]f32,
+    font_size: f32,
 
     size: [2]f32,
     position: [2]f32,
@@ -557,6 +559,7 @@ pub const Block = struct {
     const FlagBits = u6;
 
     pub const empty: Block = .{
+        .font_size = 0.0,
         .rect = @splat(@splat(0.0)),
         .cached = ._null,
         .children = .empty,
@@ -590,6 +593,7 @@ pub const Block = struct {
         if (view.stacks.get(.width).head) |node| self.sizing[0] = node.value;
         if (view.stacks.get(.height).head) |node| self.sizing[1] = node.value;
         if (view.stacks.get(.radius).head) |node| self.radius = node.value;
+        if (view.stacks.get(.font_size).head) |node| self.font_size = node.value;
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
         if (view.stacks.get(.height_shrink).head) |node| self.shrink[1] = clamp(node.value, 0.0, 1.0);
 
