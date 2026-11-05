@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const DoublyLinkedList = @import("doubly_linked_list.zig").DoublyLinkedList;
 
 pub fn HashTable(
+    comptime K: type,
     comptime V: type,
     comptime Context: type,
 ) type {
@@ -24,8 +25,8 @@ pub fn HashTable(
             @memset(self.slots, .empty);
         }
 
-        pub fn get(self: *@This(), key: u64) ?*V {
-            const list = &self.slots[key % self.slots.len];
+        pub fn get(self: *@This(), key: K) ?*V {
+            const list = &self.slots[self.ctx.hash(key) % self.slots.len];
             var entry = list.first;
 
             while (entry) |v| : (entry = v.next) {
@@ -37,8 +38,8 @@ pub fn HashTable(
             return null;
         }
 
-        pub fn insert(self: *@This(), key: u64, value: *V) void {
-            const list = &self.slots[key % self.slots.len];
+        pub fn insert(self: *@This(), key: K, value: *V) void {
+            const list = &self.slots[self.ctx.hash(key) % self.slots.len];
 
             list.append(value);
         }

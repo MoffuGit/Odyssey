@@ -471,8 +471,12 @@ fn stackFlag(field: StackField) u64 {
 }
 
 const Cache = HashTable(
+    u64,
     Cached,
     struct {
+        pub fn hash(_: @This(), k: u64) u64 {
+            return k;
+        }
         pub fn eql(_: @This(), k: u64, cached: *Cached) bool {
             const block: *Block = @fieldParentPtr("cached", cached);
             return k == block.key;
