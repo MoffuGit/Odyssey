@@ -62,6 +62,12 @@ pub fn pathsForTarget(b: *std.Build, target: std.Target) !Cache.Value {
                 },
             ) catch break :darwin;
 
+            // The configure cache can't see the `xcrun` call above, so
+            // reconfigure when the installed SDKs change (e.g. an Xcode
+            // update replacing MacOSX27.0.sdk with MacOSX27.2.sdk).
+            const sdk_root = std.fs.path.dirname(std.fs.path.dirname(libc.sys_include_dir.?).?).?;
+            b.dependOnDirectoryContents(.{ .cwd_relative = std.fs.path.dirname(sdk_root).? });
+
             // Render the file compatible with the `--libc` Zig flag.
             var stream: std.Io.Writer.Allocating = .init(b.allocator);
             defer stream.deinit();
