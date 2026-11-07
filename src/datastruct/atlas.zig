@@ -128,9 +128,9 @@ pub fn reserve(self: *Atlas, width: u32, height: u32) !Region {
         };
     } else {
         bottom = .{
-            .x = free_region.x + region.width,
+            .x = free_region.x,
             .y = free_region.y + region.height,
-            .width = free_region.width - region.width,
+            .width = region.width,
             .height = free_region.height - region.height,
         };
         right = .{
@@ -173,7 +173,7 @@ pub fn deinit(self: *Atlas) void {
     self.arena.deinit();
 }
 
-const Region = struct {
+pub const Region = struct {
     x: u32,
     y: u32,
     width: u32,
@@ -209,7 +209,7 @@ test "Basic Operations" {
     const c = try atlas.reserve(30, 20);
     try expectRegion(c, 0, 40, 20, 30);
     try testing.expect(atlas.regions.len() == 2);
-    try expectRegion(atlas.regions.first.?.region, 20, 70, 80, 30);
+    try expectRegion(atlas.regions.first.?.region, 0, 70, 20, 30);
     try expectRegion(atlas.regions.first.?.next.?.region, 20, 40, 80, 60);
     try testing.expect(atlas.free.is_empty());
 
