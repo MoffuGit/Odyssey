@@ -17,6 +17,8 @@ const TaggedLinkedList = datastruct.TaggedLinkedList;
 const rng2 = @import("math.zig").rng2;
 const win = @import("window.zig");
 const Window = win.Window;
+const FontCache = @import("font.zig");
+const Run = FontCache.Run;
 
 const log = std.log.scoped(.view);
 
@@ -46,7 +48,9 @@ cache: Cache,
 
 chunks: chunk_pool.ChunkAllocator,
 
-pub fn init(self: *View, gpa: Allocator) !void {
+font_cache: *FontCache,
+
+pub fn init(self: *View, font_cache: *FontCache, gpa: Allocator) !void {
     self.* = .{
         .active = null,
         .hot = null,
@@ -62,6 +66,7 @@ pub fn init(self: *View, gpa: Allocator) !void {
         .stacks = .empty,
         .pop_flags = 0,
         .chunks = undefined,
+        .font_cache = font_cache,
     };
 
     const arena = self.arena.allocator();
@@ -84,7 +89,52 @@ pub fn deinit(self: *View) void {
     self.arena.deinit();
 }
 
-pub fn begin(self: *View, window: Window, resize: bool) !void {
+pub fn getSeed(self: *View) u64 {
+    var seed: u64 = 0;
+    var iter = self.stacks.get(.parent).iterator();
+    while (iter.next()) |node| {
+        if (node.value.key) |key| {
+            seed = key;
+            break;
+        }
+    }
+
+    return seed;
+}
+
+pub fn keyFromString(seed: u64, str: []const u8) ?u64 {
+    var key: ?u64 = null;
+    if (std.mem.find(u8, str, "@@@")) |index| {
+        const chunk = str[index + "@@@".len ..];
+
+        if (chunk.len != 0) {
+            key = Wyhash.hash(seed, chunk);
+        }
+    }
+
+    return key;
+}
+
+pub fn displayString(str: []const u8) []const u8 {
+    const idx = std.mem.find(u8, str, "@@@") orelse str.len;
+
+    return str[0..idx];
+}
+
+pub fn setDisplayString(self: *View, block: *Block, str: []const u8) void {
+    const arena = self.frameArena();
+    block.string = arena.dupe(u8, str) catch return;
+    block.run = self.font_cache.run(
+        block.font,
+        block.font_size,
+        displayString(str),
+    ) catch |err| {
+        log.err("Run err={}", .{err});
+        return;
+    };
+}
+
+pub fn begin(self: *View, window: Window, resize: bool, fnt: u64) !void {
     const window_size = try window.size();
 
     self.root = null;
@@ -107,6 +157,8 @@ pub fn begin(self: *View, window: Window, resize: bool) !void {
 
     self.pushAttr(.{ .width = .fit });
     self.pushAttr(.{ .height = .fit });
+    self.pushAttr(.{ .font = fnt });
+    self.pushAttr(.{ .font_size = 12.0 });
 }
 
 pub fn finish(self: *View) void {
@@ -217,24 +269,13 @@ pub fn fmt(self: *View, comptime format: []const u8, args: anytype) ![]u8 {
 }
 
 pub fn blkStr(self: *View, str: []const u8, flags: Block.Flags) *Block {
-    const key = key: {
-        if (std.mem.find(u8, str, "@@@")) |index| {
-            const chunk = str[index + "@@@".len ..];
+    const key = keyFromString(self.getSeed(), str);
 
-            if (chunk.len == 0) break :key null else {
-                var node = self.stacks.get(.parent).head;
-                while (node) |current| : (node = current.next) {
-                    if (current.value.key) |parent_key| {
-                        break :key Wyhash.hash(parent_key, chunk);
-                    }
-                }
+    const block = self.blk(.{ .flags = flags, .key = key });
 
-                break :key Wyhash.hash(0, chunk);
-            }
-        } else break :key null;
-    };
+    if (block.flags.text) self.setDisplayString(block, str);
 
-    return self.blk(.{ .flags = flags, .key = key });
+    return block;
 }
 
 const Options = struct {
@@ -378,6 +419,14 @@ pub fn rounded(self: *View, radius: f32) void {
     self.nextAttr(.{ .radius = @splat(radius) });
 }
 
+pub fn font(self: *View, value: u64) void {
+    self.nextAttr(.{ .font = value });
+}
+
+pub fn fontSize(self: *View, value: f32) void {
+    self.nextAttr(.{ .font_size = value });
+}
+
 pub fn size(self: *View, sizing: Sizing) void {
     self.width(sizing);
     self.height(sizing);
@@ -435,7 +484,7 @@ pub fn spacer(self: *View, sizing: Sizing, factor: f32) void {
 }
 
 pub fn button(self: *View, str: []const u8) Signal {
-    const block = self.blkStr(str, .{ .mouse = true });
+    const block = self.blkStr(str, .{ .mouse = true, .text = true });
     self.blkEnd();
 
     return self.signal(block);
@@ -461,6 +510,7 @@ pub const Attribute = union(enum) {
     thickness: f32,
     padding: struct { Sizing, f32 },
     font_size: f32,
+    font: u64,
 };
 
 const Stacks = TaggedLinkedList(Attribute);
@@ -542,6 +592,9 @@ pub const Block = struct {
     flags: Flags,
     radius: [4]f32,
     font_size: f32,
+    font: u64,
+    string: ?[]const u8,
+    run: ?Run,
 
     size: [2]f32,
     position: [2]f32,
@@ -554,11 +607,15 @@ pub const Block = struct {
         background: bool = false,
         border: bool = false,
         padding: bool = false,
+        text: bool = false,
     };
 
-    const FlagBits = u6;
+    const FlagBits = @typeInfo(Flags).@"struct".backing_integer.?;
 
     pub const empty: Block = .{
+        .run = null,
+        .string = null,
+        .font = 0,
         .font_size = 0.0,
         .rect = @splat(@splat(0.0)),
         .cached = ._null,
@@ -594,6 +651,7 @@ pub const Block = struct {
         if (view.stacks.get(.height).head) |node| self.sizing[1] = node.value;
         if (view.stacks.get(.radius).head) |node| self.radius = node.value;
         if (view.stacks.get(.font_size).head) |node| self.font_size = node.value;
+        if (view.stacks.get(.font).head) |node| self.font = node.value;
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
         if (view.stacks.get(.height_shrink).head) |node| self.shrink[1] = clamp(node.value, 0.0, 1.0);
 
@@ -624,6 +682,8 @@ pub const Block = struct {
         self.shrink = @splat(0.0);
         self.color = @splat(0.0);
         self.flags = .{};
+        self.string = null;
+        self.run = null;
     }
 
     pub fn nextPre(self: *Block) ?*Block {

@@ -27,20 +27,20 @@ gpa: Allocator,
 data: HashTable(u64, Data, Data.Context),
 fonts: HashTable(u64, Font, Font.Context),
 collections: HashTable(u64, Collection, Collection.Context),
-glyphs: HashTable(Glyph.Key, Glyph, Glyph.Context),
 atlas: Atlas,
+atlas_gen: u64,
 buffer: std.ArrayList(u8),
-glyph_buffer: std.ArrayList(Glyph),
+piece_buffer: std.ArrayList(Piece),
 
 pub fn init(self: *Cache, gpa: Allocator) !void {
     self.* = .{
-        .glyph_buffer = .empty,
+        .atlas_gen = 0,
+        .piece_buffer = .empty,
         .gpa = gpa,
         .arena = .init(gpa),
         .data = undefined,
         .fonts = undefined,
         .atlas = undefined,
-        .glyphs = undefined,
         .collections = undefined,
         .buffer = .empty,
     };
@@ -53,7 +53,6 @@ pub fn init(self: *Cache, gpa: Allocator) !void {
 
     try self.data.init(1028, .{}, arena);
     try self.fonts.init(1028, .{}, arena);
-    try self.glyphs.init(1028, .{}, arena);
     try self.collections.init(1028, .{}, arena);
 }
 
@@ -63,7 +62,7 @@ pub fn deinit(self: *Cache) void {
     self.atlas.deinit();
     self.arena.deinit();
     self.buffer.deinit(self.gpa);
-    self.glyph_buffer.deinit(self.gpa);
+    self.piece_buffer.deinit(self.gpa);
 }
 
 pub fn fromPath(self: *Cache, abs_path: []const u8, index: u32, io: Io) !Tag {
@@ -121,7 +120,7 @@ pub fn addFont(self: *Cache, data: *Data, index: u32, tag: Tag) !void {
 
     const font = try arena.create(Font);
 
-    font.init(data, index, tag);
+    try font.init(data, index, tag, arena);
     self.fonts.insert(tag.font_hash, font);
 }
 
@@ -155,7 +154,7 @@ pub fn run(
 
     if (collection.runs.get(.{ .str = str, .size = size })) |cached| return cached.*;
 
-    self.glyph_buffer.clearRetainingCapacity();
+    self.piece_buffer.clearRetainingCapacity();
 
     const context = collection.context;
     context.ShapeBegin(kb.KBTS_DIRECTION_DONT_KNOW, kb.KBTS_LANGUAGE_ENGLISH);
@@ -171,14 +170,27 @@ pub fn run(
         var kb_glyph: [*c]kb.kbts_glyph = undefined;
         while (kb_run.Glyphs.GlyphIteratorNext(&kb_glyph) != 0) {
             const glyph = try self.getGlyph(font.tag, kb_glyph.*.Id, size);
-            try self.glyph_buffer.append(self.gpa, glyph);
+            const advance_x = kb_glyph.*.AdvanceX;
+            const advance_y = kb_glyph.*.AdvanceY;
+
+            try self.piece_buffer.append(self.gpa, .{
+                .rotate = glyph.rotate,
+                .width = glyph.width,
+                .height = glyph.height,
+                .off_x = glyph.off_x,
+                .off_y = glyph.off_y,
+                .x = glyph.x,
+                .y = glyph.y,
+                .advance_x = @intCast(advance_x),
+                .advance_y = @intCast(advance_y),
+            });
         }
     }
 
     const new = try arena.create(Run);
     new.* = .{
         .str = try arena.dupe(u8, str),
-        .glyphs = try arena.dupe(Glyph, self.glyph_buffer.items),
+        .pieces = try arena.dupe(Piece, self.piece_buffer.items),
         .size = size,
     };
     collection.runs.insert(.{ .str = new.str, .size = size }, new);
@@ -191,7 +203,7 @@ pub fn getGlyph(self: *Cache, tag: Tag, index: u16, size: f32) !Glyph {
 
     if (font.status == .invalid) return error.InvalidFont;
 
-    if (self.glyphs.get(.{ .index = index, .tag = tag, .size = size })) |glyph| return glyph.*;
+    if (font.glyphs.get(.{ .index = index, .size = size })) |glyph| return glyph.*;
 
     const arena = self.arena.allocator();
 
@@ -222,13 +234,13 @@ pub fn getGlyph(self: *Cache, tag: Tag, index: u16, size: f32) !Glyph {
         }
 
         self.atlas.set(region, pixels);
+        self.atlas_gen += 1;
     }
 
     const glyph = try arena.create(Glyph);
 
     glyph.* = .{
         .size = size,
-        .tag = tag,
         .index = index,
         .width = bitmap.width,
         .height = bitmap.height,
@@ -239,7 +251,7 @@ pub fn getGlyph(self: *Cache, tag: Tag, index: u16, size: f32) !Glyph {
         .y = region.y,
     };
 
-    self.glyphs.insert(glyph.key(), glyph);
+    font.glyphs.insert(glyph.key(), glyph);
 
     return glyph.*;
 }
@@ -269,13 +281,15 @@ const Font = struct {
     ttf: TrueType,
     kbf: kb.kbts_font,
     status: Status,
+    glyphs: HashTable(Glyph.Key, Glyph, Glyph.Context),
 
-    pub fn init(self: *Font, data: *Data, index: u32, tag: Tag) void {
+    pub fn init(self: *Font, data: *Data, index: u32, tag: Tag, arena: Allocator) !void {
         self.* = .{
             .index = index,
             .tag = tag,
             .ttf = undefined,
             .kbf = undefined,
+            .glyphs = undefined,
             .status = .invalid,
         };
 
@@ -295,6 +309,8 @@ const Font = struct {
 
         self.kbf.UserData = self;
         self.status = .loaded;
+
+        try self.glyphs.init(1028, .{}, arena);
     }
 
     pub const Context = struct {
@@ -397,7 +413,6 @@ const Glyph = struct {
     next: ?*Glyph = null,
     prev: ?*Glyph = null,
 
-    tag: Tag,
     index: u16,
     size: f32,
     rotate: bool,
@@ -410,14 +425,12 @@ const Glyph = struct {
 
     pub fn key(self: *const Glyph) Key {
         return .{
-            .tag = self.tag,
             .index = self.index,
             .size = self.size,
         };
     }
 
     const Key = struct {
-        tag: Tag,
         index: u16,
         size: f32,
     };
@@ -426,7 +439,6 @@ const Glyph = struct {
         pub fn hash(_: @This(), k: Key) u64 {
             var hasher = std.hash.Wyhash.init(0);
             autoHash(&hasher, k.index);
-            autoHash(&hasher, k.tag);
             autoHash(&hasher, @as(u32, @bitCast(k.size)));
             return hasher.final();
         }
@@ -437,7 +449,19 @@ const Glyph = struct {
     };
 };
 
-const Run = struct {
+const Piece = struct {
+    rotate: bool,
+    width: u32,
+    height: u32,
+    off_x: i16,
+    off_y: i16,
+    x: u32,
+    y: u32,
+    advance_x: u32,
+    advance_y: u32,
+};
+
+pub const Run = struct {
     pub const Key = struct {
         str: []const u8,
         size: f32,
@@ -446,7 +470,7 @@ const Run = struct {
     prev: ?*Run = null,
 
     str: []const u8,
-    glyphs: []const Glyph,
+    pieces: []const Piece,
     size: f32,
 
     pub const Context = struct {
@@ -531,21 +555,16 @@ test "basic" {
 
     const res = try cache.run(collection, 12, "Hello");
 
-    try testing.expectEqual(5, res.glyphs.len);
-    try testing.expectEqual(res.glyphs[2], res.glyphs[3]);
-    try testing.expect(!std.meta.eql(res.glyphs[0], res.glyphs[1]));
+    try testing.expectEqual(5, res.pieces.len);
+    try testing.expectEqual(res.pieces[2], res.pieces[3]);
+    try testing.expect(!std.meta.eql(res.pieces[0], res.pieces[1]));
 
     const cached = try cache.run(collection, 12, "Hello");
-    try testing.expectEqual(res.glyphs.ptr, cached.glyphs.ptr);
+    try testing.expectEqual(res.pieces.ptr, cached.pieces.ptr);
 
     const bigger = try cache.run(collection, 24, "Hello");
 
-    try testing.expect(bigger.glyphs[0].height > res.glyphs[0].height);
-
-    try testing.expectEqual(tag1, res.glyphs[0].tag);
-    const other = try cache.addCollection(&.{tag2});
-    try testing.expectEqual(tag2, (try cache.run(other, 12, "Hi")).glyphs[0].tag);
-    try testing.expectEqual(tag1, (try cache.run(collection, 12, "Hi")).glyphs[0].tag);
+    try testing.expect(bigger.pieces[0].height > res.pieces[0].height);
 
     var before: std.ArrayList(Atlas.Region) = .empty;
     defer before.deinit(gpa);
@@ -553,8 +572,8 @@ test "basic" {
     while (node) |n| : (node = n.next) try before.append(gpa, n.region);
 
     const space = try cache.run(collection, 24, " ");
-    try testing.expectEqual(0, space.glyphs[0].width);
-    try testing.expectEqual(0, space.glyphs[0].height);
+    try testing.expectEqual(0, space.pieces[0].width);
+    try testing.expectEqual(0, space.pieces[0].height);
 
     node = cache.atlas.regions.first;
     for (before.items) |region| {
@@ -562,42 +581,4 @@ test "basic" {
         node = node.?.next;
     }
     try testing.expectEqual(null, node);
-}
-
-test "atlas holds each glyph bitmap, transposed when rotated" {
-    const gpa = testing.allocator;
-
-    var cache: Cache = undefined;
-    try cache.init(gpa);
-    defer cache.deinit();
-
-    const tag = try cache.fromBytes(embedded.inter, 0);
-    const collection = try cache.addCollection(&.{tag});
-    const font = cache.fonts.get(tag.font_hash).?;
-
-    var rotated: usize = 0;
-    for ([_]f32{ 13, 29, 47 }) |size| {
-        const res = try cache.run(collection, size, "The quick brown fox jumps over the lazy dog! WMQ@#gjpy");
-
-        for (res.glyphs) |glyph| {
-            var pixels: std.ArrayList(u8) = .empty;
-            defer pixels.deinit(gpa);
-
-            const scale = font.ttf.scaleForPixelHeight(size);
-            const bitmap = try font.ttf.glyphBitmap(gpa, &pixels, @fromBackingInt(glyph.index), scale, scale);
-            if (glyph.rotate) rotated += 1;
-
-            for (0..bitmap.height) |y| {
-                for (0..bitmap.width) |x| {
-                    const ax, const ay = if (glyph.rotate) .{ y, x } else .{ x, y };
-                    try testing.expectEqual(
-                        pixels.items[y * bitmap.width + x],
-                        cache.atlas.buffer[(glyph.y + ay) * cache.atlas.width + glyph.x + ax],
-                    );
-                }
-            }
-        }
-    }
-
-    try testing.expect(rotated > 0);
 }

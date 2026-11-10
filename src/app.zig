@@ -15,6 +15,8 @@ const Handle = render.Handle;
 const View = @import("view.zig");
 const win = @import("window.zig");
 const Window = win.Window;
+const Cache = @import("font.zig");
+const embedded = @import("embedded.zig");
 
 const log = std.log.scoped(.app);
 
@@ -28,12 +30,15 @@ core: Core,
 display: Display,
 renderer: Renderer,
 states: SinglyLinkedList(WindowState),
+font_cache: Cache,
+collection: u64,
 
 pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     try win.init("Odyssey", 0);
     errdefer win.deinit();
 
     self.* = .{
+        .collection = 0,
         .arena = .init(gpa),
         .chunks = undefined,
         .io = io,
@@ -42,7 +47,16 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
         .renderer = undefined,
         .core = undefined,
         .display = undefined,
+        .font_cache = undefined,
     };
+
+    try self.font_cache.init(gpa);
+    errdefer self.font_cache.deinit();
+
+    const inter = try self.font_cache.fromBytes(embedded.inter, 0);
+    const collection = try self.font_cache.addCollection(&.{inter});
+
+    self.collection = collection;
 
     const arena = self.arena.allocator();
     errdefer self.arena.deinit();
@@ -70,6 +84,7 @@ pub fn deinit(self: *App) void {
     self.renderer.deinit();
     self.core.deinit();
     self.arena.deinit();
+    self.font_cache.deinit();
     win.deinit();
 }
 
@@ -91,7 +106,7 @@ pub const WindowState = struct {
             .handle = undefined,
         };
 
-        try self.view.init(app.gpa);
+        try self.view.init(&app.font_cache, app.gpa);
         errdefer self.view.deinit();
 
         try self.win.init(opts);
@@ -185,7 +200,7 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
     {
         const view = &ws.view;
 
-        try view.begin(ws.win, resize);
+        try view.begin(ws.win, resize, app.collection);
         defer view.finish();
 
         view.background(.{ 1.0, 0.0, 0.0, 1.0 });
@@ -197,7 +212,10 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             view.background(.{ 0.0, 1.0, 0.0, 1.0 });
             view.padding(.grow, 1.0);
 
-            const green = view.blkStr("@@@green", .{ .mouse = true });
+            const green = view.blkStr(
+                "Hello@@@green",
+                .{ .mouse = true, .text = true },
+            );
             defer view.blkEnd();
 
             view.col();
@@ -232,6 +250,10 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             .viewport_size = try ws.win.size(),
         };
 
+        if (frame.atlas_gen != app.font_cache.atlas_gen) {
+            try frame.syncAtlas(&app.renderer, &app.font_cache.atlas);
+        }
+
         var node = ws.view.root;
         while (node) |box| : (node = box.nextPre()) {
             const rect = box.rect[0] ++ box.rect[1];
@@ -263,6 +285,12 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
                     },
                 });
             }
+
+            // if (box.flags.text) {
+            //     if (box.run) |r| {
+            //         const piece = r.pieces[0];
+            //     }
+            // }
         }
 
         render.render(&app.renderer, &ws.handle, frame, resize);

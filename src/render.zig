@@ -17,6 +17,7 @@ const objc = @import("objc");
 const chunk_pool = @import("chunk_pool.zig");
 const ChunkPool = chunk_pool.ChunkPool;
 const datastruct = @import("datastruct.zig");
+const Atlas = datastruct.Atlas;
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const Metal = @import("render/metal.zig");
 const win = @import("window.zig");
@@ -194,6 +195,14 @@ pub const FrameState = struct {
         errdefer self.atlas_texture.deinit();
     }
 
+    pub fn deinit(self: *FrameState) void {
+        self.atlas_texture.deinit();
+        self.uniform_buffer.deinit();
+        self.rects.deinit();
+        self.free_rects.deinit();
+        self.arena.deinit();
+    }
+
     pub fn rect(self: *FrameState, renderer: *Renderer, data: Rect) !void {
         const arena = self.arena.allocator();
         const list = &self.rects;
@@ -225,12 +234,13 @@ pub const FrameState = struct {
         ptr.* = data;
     }
 
-    pub fn deinit(self: *FrameState) void {
-        self.atlas_texture.deinit();
-        self.uniform_buffer.deinit();
-        self.rects.deinit();
-        self.free_rects.deinit();
-        self.arena.deinit();
+    pub fn syncAtlas(self: *FrameState, renderer: *Renderer, atlas: *Atlas) !void {
+        if (self.atlas_texture.width < atlas.width or self.atlas_texture.height < atlas.height) {
+            self.atlas_texture.deinit();
+            self.atlas_texture = try renderer.texture(atlas.width, atlas.height, null);
+        }
+
+        try self.atlas_texture.replaceRegion(0, 0, atlas.width, atlas.height, atlas.buffer);
     }
 
     pub fn reset(self: *FrameState) void {
