@@ -43,7 +43,7 @@ pub fn main(init: std.process.Init) !void {
         .flags = win.WindowCenter | win.WindowFocus,
     });
 
-    app.run();
+    try app.run();
 }
 
 test {

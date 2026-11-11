@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 
 const macos = @import("macos");
 
@@ -13,8 +14,19 @@ const Display = @This();
 display_c: Completion,
 display_link: *macos.video.DisplayLink,
 waker: Waker,
+loop: Loop,
 
-pub fn init(self: *Display, loop: *Loop, comptime function: *const fn (*Display) bool) !void {
+pub fn init(self: *Display, comptime function: *const fn (*Display) bool, io: Io) !void {
+    self.* = .{
+        .display_link = undefined,
+        .display_c = .noop,
+        .waker = undefined,
+        .loop = undefined,
+    };
+
+    try self.loop.init(undefined, io);
+    errdefer self.loop.deinit();
+
     const Callback = struct {
         pub fn callback(completion: *Completion, _: *Loop, res: anyerror!void) bool {
             res catch unreachable;
@@ -24,13 +36,8 @@ pub fn init(self: *Display, loop: *Loop, comptime function: *const fn (*Display)
         }
     };
 
-    self.* = .{
-        .display_link = undefined,
-        .display_c = .noop,
-        .waker = undefined,
-    };
-
-    self.waker = try loop.await(&self.display_c, Callback.callback);
+    self.waker = try self.loop.await(&self.display_c, Callback.callback);
+    errdefer self.waker.close();
 
     self.display_link = try macos.video.DisplayLink.createWithActiveCGDisplays();
     errdefer self.display_link.release();
@@ -48,6 +55,14 @@ pub fn init(self: *Display, loop: *Loop, comptime function: *const fn (*Display)
     );
 
     try self.display_link.start();
+}
+
+pub fn run(self: *Display) !void {
+    try self.loop.run(.until_done);
+}
+
+pub fn stop(self: *Display) void {
+    self.loop.stop();
 }
 
 pub fn deinit(self: *Display) void {

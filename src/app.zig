@@ -70,6 +70,9 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     try self.scheduler.init(arena, io);
     errdefer self.scheduler.deinit();
 
+    try self.display.init(displayCallback, io);
+    errdefer self.display.deinit();
+
     try self.loop.init(&self.scheduler, io);
     errdefer self.loop.deinit();
 
@@ -86,9 +89,6 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     try self.renderer.init();
     errdefer self.renderer.deinit();
 
-    try self.display.init(&self.loop, displayCallback);
-    errdefer self.display.deinit();
-
     win.setEventCallback(.window_resized, resizeCallback);
 }
 
@@ -102,14 +102,13 @@ pub fn deinit(self: *App) void {
     win.deinit();
     self.scheduler.deinit();
     self.loop.deinit();
+    self.display.deinit();
 
     self.arena.deinit();
 }
 
-pub fn run(self: *App) void {
-    self.loop.run(.until_done) catch |err| {
-        log.err("loop err: {}", .{err});
-    };
+pub fn run(self: *App) !void {
+    try self.display.run();
 }
 
 pub const WindowState = struct {
@@ -176,7 +175,7 @@ fn resizeCallback(event: win.Event) void {
 fn displayCallback(display: *Display) bool {
     const self: *App = @fieldParentPtr("display", display);
 
-    if (self.states.is_empty()) self.loop.stop();
+    if (self.states.is_empty()) self.display.stop();
 
     win.pollEvents();
 
@@ -204,6 +203,10 @@ fn displayCallback(display: *Display) bool {
             self.states.append(state);
         }
     }
+
+    self.loop.run(.no_wait) catch |err| {
+        log.err("Loop err={}", .{err});
+    };
 
     return true;
 }
