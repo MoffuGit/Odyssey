@@ -1,43 +1,49 @@
 const std = @import("std");
-const heap = std.heap;
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const Io = std.Io;
 
+const Cache = @import("font.zig");
 const chunk_pool = @import("chunk_pool.zig");
 const ChunkAllocator = chunk_pool.ChunkAllocator;
 const Core = @import("core.zig");
 const datastruct = @import("datastruct.zig");
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const Display = @import("display.zig");
+const embedded = @import("embedded.zig");
+const Loop = @import("loop.zig");
 const render = @import("render.zig");
 const Renderer = render.Renderer;
 const Handle = render.Handle;
+const Scheduler = @import("scheduler.zig");
 const View = @import("view.zig");
 const win = @import("window.zig");
 const Window = win.Window;
-const Cache = @import("font.zig");
-const embedded = @import("embedded.zig");
 
 const log = std.log.scoped(.app);
 
 pub const App = @This();
 
 io: Io,
-gpa: Allocator,
-arena: heap.ArenaAllocator,
-chunks: ChunkAllocator,
 core: Core,
+gpa: Allocator,
+arena: ArenaAllocator,
+chunks: ChunkAllocator,
 display: Display,
 renderer: Renderer,
 states: SinglyLinkedList(WindowState),
 font_cache: Cache,
 collection: u64,
+scheduler: Scheduler,
+loop: Loop,
 
 pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     try win.init("Odyssey", 0);
     errdefer win.deinit();
 
     self.* = .{
+        .scheduler = undefined,
+        .loop = undefined,
         .collection = 0,
         .arena = .init(gpa),
         .chunks = undefined,
@@ -61,6 +67,12 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     const arena = self.arena.allocator();
     errdefer self.arena.deinit();
 
+    try self.scheduler.init(arena, io);
+    errdefer self.scheduler.deinit();
+
+    try self.loop.init(&self.scheduler, io);
+    errdefer self.loop.deinit();
+
     try self.chunks.init(arena, &.{
         .{
             .capacity = 50,
@@ -74,22 +86,30 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     try self.renderer.init();
     errdefer self.renderer.deinit();
 
-    try self.display.init(&self.core, displayCallback);
+    try self.display.init(&self.loop, displayCallback);
     errdefer self.display.deinit();
 
     win.setEventCallback(.window_resized, resizeCallback);
 }
 
 pub fn deinit(self: *App) void {
+    self.loop.run(.until_done) catch |err| {
+        log.err("loop err on deinit: {}", .{err});
+    };
     self.renderer.deinit();
     self.core.deinit();
-    self.arena.deinit();
     self.font_cache.deinit();
     win.deinit();
+    self.scheduler.deinit();
+    self.loop.deinit();
+
+    self.arena.deinit();
 }
 
 pub fn run(self: *App) void {
-    self.core.run(.until_done);
+    self.loop.run(.until_done) catch |err| {
+        log.err("loop err: {}", .{err});
+    };
 }
 
 pub const WindowState = struct {
@@ -156,7 +176,7 @@ fn resizeCallback(event: win.Event) void {
 fn displayCallback(display: *Display) bool {
     const self: *App = @fieldParentPtr("display", display);
 
-    if (self.states.is_empty()) self.core.stop();
+    if (self.states.is_empty()) self.loop.stop();
 
     win.pollEvents();
 
@@ -196,11 +216,11 @@ pub fn openWindow(self: *App, opts: win.Options) !void {
     self.states.append(window_state);
 }
 
-pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
+pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
     {
         const view = &ws.view;
 
-        try view.begin(ws.win, resize, app.collection);
+        try view.begin(ws.win, resize, self.collection);
         defer view.finish();
 
         view.background(.{ 1.0, 0.0, 0.0, 1.0 });
@@ -250,8 +270,8 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             .viewport_size = try ws.win.size(),
         };
 
-        if (frame.atlas_gen != app.font_cache.atlas_gen) {
-            try frame.syncAtlas(&app.renderer, &app.font_cache.atlas);
+        if (frame.atlas_gen != self.font_cache.atlas_gen) {
+            try frame.syncAtlas(&self.renderer, &self.font_cache.atlas);
         }
 
         var node = ws.view.root;
@@ -259,7 +279,7 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             const rect = box.rect[0] ++ box.rect[1];
 
             if (box.flags.background) {
-                try frame.rect(&app.renderer, .{
+                try frame.rect(&self.renderer, .{
                     .position = rect,
                     .src_position = undefined,
                     .color_0 = box.color,
@@ -272,7 +292,7 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             }
 
             if (box.flags.border) {
-                try frame.rect(&app.renderer, .{
+                try frame.rect(&self.renderer, .{
                     .position = rect,
                     .src_position = undefined,
                     .color_0 = box.border,
@@ -293,6 +313,6 @@ pub fn renderWindow(app: *App, ws: *WindowState, resize: bool) !void {
             // }
         }
 
-        render.render(&app.renderer, &ws.handle, frame, resize);
+        render.render(&self.renderer, &ws.handle, frame, resize);
     }
 }

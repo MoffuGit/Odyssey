@@ -18,7 +18,9 @@ const RANGE_NODE_SIZE = ChunkedPath.RANGE_NODE_SIZE;
 const CHUNK_SIZE = ChunkedPath.CHUNKS_SIZE;
 const constants = @import("../constants.zig");
 const MAX_PATH_LEN = constants.MAX_PATH_LEN;
+const Core = @import("../core.zig");
 const datastruct = @import("../datastruct.zig");
+const MpscBounded = datastruct.MpscBounded;
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const global = @import("../global.zig");
 const Loop = @import("../loop.zig");
@@ -26,8 +28,6 @@ const Completion = Loop.Completion;
 const Waker = Loop.Waker;
 const Scheduler = @import("../scheduler.zig");
 const Task = Scheduler.Task;
-const Worktree = @import("../worktree.zig");
-const Event = Worktree.Event;
 const attr = @import("attr.zig");
 const BulkAttr = attr.BulkAttr;
 const Snapshot = @import("snapshot.zig");
@@ -39,8 +39,8 @@ const Scanner = @This();
 
 io: Io,
 gpa: Allocator,
-scheduler: *Scheduler,
-arena: Allocator,
+core: *Core,
+arena: heap.ArenaAllocator,
 snapshot: Snapshot,
 mutex: Io.Mutex,
 chunks: ChunkAllocator,
@@ -48,20 +48,58 @@ last_update: atomic.Value(i64),
 task_count: atomic.Value(u64),
 stopped: atomic.Value(bool),
 
+/// One reference for the owner, released by `stop`, plus one per queued task.
+/// The last release hands the scanner back to core, which destroys it.
+refs: atomic.Value(u64),
+background: Core.Background,
+
+/// Updates for the owner; the owner pops them after `waker` fires.
+events: MpscBounded(Event),
+waker: Waker,
+
 scan_id: atomic.Value(u64),
 completed_scan: u64,
 
-pub fn init(
+pub const Event = union(enum) {
+    update: struct {
+        snapshot: Snapshot,
+        scanning: bool,
+    },
+    started,
+
+    pub fn deinit(self: *Event) void {
+        switch (self.*) {
+            .update => |*updated| {
+                updated.snapshot.deinit();
+            },
+            else => {},
+        }
+    }
+};
+
+/// Creates a scanner owned by `core` that scans a copy of `snapshot` and wakes
+/// `waker` whenever it pushes an event. Call `stop` to release it.
+pub fn create(core: *Core, snapshot: *const Snapshot, waker: Waker) !*Scanner {
+    const self = try core.gpa.create(Scanner);
+    errdefer core.gpa.destroy(self);
+
+    try self.init(core, snapshot, waker);
+
+    return self;
+}
+
+fn init(
     self: *Scanner,
-    scheduler: *Scheduler,
-    gpa: Allocator,
-    arena: Allocator,
-    io: Io,
+    core: *Core,
+    snapshot: *const Snapshot,
+    waker: Waker,
 ) !void {
+    const io = core.io;
+
     self.* = .{
-        .scheduler = scheduler,
-        .gpa = gpa,
-        .arena = arena,
+        .core = core,
+        .gpa = core.gpa,
+        .arena = .init(core.gpa),
         .io = io,
         .snapshot = undefined,
         .mutex = .init,
@@ -71,13 +109,22 @@ pub fn init(
         .completed_scan = 0,
         .task_count = .init(0),
         .stopped = .init(false),
+        .refs = .init(1),
+        .background = .{ .destroy = destroy },
+        .events = undefined,
+        .waker = waker,
     };
+    errdefer self.arena.deinit();
 
-    self.snapshot = try self.parent().snapshot.clone(self.gpa);
+    const arena = self.arena.allocator();
+
+    self.events = try .init(global.cpu_count, 64, arena);
+
+    self.snapshot = try snapshot.clone(self.gpa);
     errdefer self.snapshot.deinit();
 
     try self.chunks.initThreadSafe(
-        self.arena,
+        arena,
         &.{
             .{ .capacity = 1024 * 1024 * 1024, .chunk_size = RANGE_NODE_SIZE },
             .{ .capacity = 1024 * 1024 * 1024, .chunk_size = CHUNK_SIZE },
@@ -103,13 +150,31 @@ pub fn init(
     try self.pushTask(task);
 }
 
-pub fn deinit(self: *Scanner) void {
+fn destroy(background: *Core.Background) void {
+    const self: *Scanner = @fieldParentPtr("background", background);
+    const gpa = self.gpa;
+
+    while (self.events.pop()) |event| {
+        var e = event;
+        e.deinit();
+    }
+
     self.snapshot.deinit();
+    self.arena.deinit();
+    gpa.destroy(self);
 }
 
-pub fn stop(self: *Scanner) bool {
+/// Tells the scanner its owner is gone and releases the owner's reference.
+/// Queued tasks finish without scanning, and the owner must not touch the
+/// scanner again, including its events.
+pub fn stop(self: *Scanner) void {
     self.stopped.store(true, .release);
-    return self.task_count.load(.acquire) == 0;
+    self.release();
+}
+
+fn release(self: *Scanner) void {
+    if (self.refs.fetchSub(1, .acq_rel) != 1) return;
+    self.core.release(&self.background);
 }
 
 const ScannerTask = struct {
@@ -129,15 +194,12 @@ const ScannerTask = struct {
     task: Task,
 };
 
-pub inline fn parent(self: *Scanner) *Worktree {
-    return @fieldParentPtr("scanner", self);
-}
-
 fn pushUpdate(self: *Scanner, scanning: bool) !void {
-    const worktree = self.parent();
-    defer worktree.waker.wake() catch unreachable;
+    if (self.stopped.load(.acquire)) return;
 
-    var producer = worktree.events.register() orelse unreachable;
+    defer self.waker.wake() catch unreachable;
+
+    var producer = self.events.register() orelse unreachable;
     defer producer.unregister();
 
     const snapshot = snapshot: {
@@ -157,16 +219,19 @@ fn pushUpdate(self: *Scanner, scanning: bool) !void {
 fn pushTask(self: *Scanner, task: *ScannerTask) !void {
     if (self.stopped.load(.acquire)) return error.Closed;
 
+    _ = self.refs.fetchAdd(1, .monotonic);
     _ = self.task_count.fetchAdd(1, .release);
-    self.scheduler.push(&task.task) catch |err| {
+    self.core.scheduler.push(&task.task) catch |err| {
         _ = self.task_count.fetchSub(1, .release);
+        _ = self.refs.fetchSub(1, .monotonic);
         return err;
     };
 }
 
 fn taskDone(self: *Scanner, task: *ScannerTask) void {
-    const chunks = self.chunks.threadSafeAllocator();
-    defer chunks.destroy(task);
+    defer self.release();
+
+    self.chunks.threadSafeAllocator().destroy(task);
 
     const prev = self.task_count.fetchSub(1, .release);
     if (prev != 1) return;
@@ -203,7 +268,6 @@ fn _taskCallback(self: *Scanner, task: *ScannerTask) !void {
 fn initialScan(
     self: *Scanner,
 ) !void {
-    const worktree = self.parent();
     const chunks = self.chunks.threadSafeAllocator();
 
     const stat = try Io.Dir.statFile(
@@ -236,11 +300,11 @@ fn initialScan(
     if (stat.kind != .directory) return;
 
     {
-        var producer = worktree.events.register() orelse unreachable;
+        var producer = self.events.register() orelse unreachable;
         defer producer.unregister();
 
         producer.push(.started);
-        try worktree.waker.wake();
+        try self.waker.wake();
     }
 
     const task = chunks.create(ScannerTask) catch unreachable;
@@ -296,6 +360,7 @@ fn scanRequest(self: *Scanner, subscription: u64, path: ChunkedPath) !void {
 
 fn scanDir(self: *Scanner, dir_path: ChunkedPath, shared_fd: ?*SharedFd, ignore: ?*const IgnoreNode) !void {
     const chunks = self.chunks.threadSafeAllocator();
+    const arena = self.arena.allocator();
     var buffer: [64 * 1024]u8 = undefined;
     var tasks: SinglyLinkedList(Task) = .empty;
     var count: u32 = 0;
@@ -325,8 +390,8 @@ fn scanDir(self: *Scanner, dir_path: ChunkedPath, shared_fd: ?*SharedFd, ignore:
         const content = dir.readFile(self.io, ".gitignore", &buffer) catch null;
 
         if (content) |src| {
-            const gi = try GitIgnore.parse(self.arena, src);
-            const node = try self.arena.create(IgnoreNode);
+            const gi = try GitIgnore.parse(arena, src);
+            const node = try arena.create(IgnoreNode);
             node.* = .{
                 .parent = ignore,
                 .gi = gi,

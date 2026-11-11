@@ -2,7 +2,6 @@ const std = @import("std");
 
 const macos = @import("macos");
 
-const Core = @import("core.zig");
 const Loop = @import("loop.zig");
 const Completion = Loop.Completion;
 const Waker = Loop.Waker;
@@ -15,7 +14,7 @@ display_c: Completion,
 display_link: *macos.video.DisplayLink,
 waker: Waker,
 
-pub fn init(self: *Display, core: *Core, comptime function: *const fn (*Display) bool) !void {
+pub fn init(self: *Display, loop: *Loop, comptime function: *const fn (*Display) bool) !void {
     const Callback = struct {
         pub fn callback(completion: *Completion, _: *Loop, res: anyerror!void) bool {
             res catch unreachable;
@@ -31,7 +30,7 @@ pub fn init(self: *Display, core: *Core, comptime function: *const fn (*Display)
         .waker = undefined,
     };
 
-    self.waker = try core.await(&self.display_c, Callback.callback);
+    self.waker = try loop.await(&self.display_c, Callback.callback);
 
     self.display_link = try macos.video.DisplayLink.createWithActiveCGDisplays();
     errdefer self.display_link.release();

@@ -8,7 +8,6 @@ const chunk_pool = @import("chunk_pool.zig");
 const chunked_path = @import("chunked_path.zig");
 const Core = @import("core.zig");
 const datastruct = @import("datastruct.zig");
-const entity = @import("entity.zig");
 const font = @import("font.zig");
 const global = @import("global.zig");
 const log = @import("log.zig");
@@ -59,7 +58,6 @@ test {
     _ = chunk_pool;
     _ = chunked_path;
     _ = datastruct;
-    _ = entity;
     _ = subscription;
     _ = Loop;
 }

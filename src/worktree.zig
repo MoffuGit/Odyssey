@@ -3,17 +3,13 @@ const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const atomic = std.atomic;
-const heap = std.heap;
 const assert = std.debug.assert;
 
 const Core = @import("core.zig");
 const chunk_pool = @import("chunk_pool.zig");
 const ChunkedPath = @import("chunked_path.zig");
-const datastruct = @import("datastruct.zig");
-const MpscBounded = datastruct.MpscBounded;
 const ent = @import("entity.zig");
 const AnyEntity = ent.AnyEntity;
-const global = @import("global.zig");
 const Loop = @import("loop.zig");
 const Waker = Loop.Waker;
 const Completion = Loop.Completion;
@@ -30,12 +26,9 @@ io: Io,
 core: *Core,
 gpa: Allocator,
 any: AnyEntity,
-arena: heap.ArenaAllocator,
 scanning: bool,
-stopped: bool,
 snapshot: Snapshot,
-scanner: Scanner,
-events: MpscBounded(Event),
+scanner: *Scanner,
 
 waker: Waker,
 await: Completion,
@@ -55,73 +48,40 @@ pub fn init(
         .core = core,
         .io = io,
         .gpa = gpa,
-        .arena = .init(gpa),
         .scanning = false,
         .snapshot = undefined,
         .scanner = undefined,
-        .stopped = false,
         .await = .noop,
         .await_c = .noop,
         .waker = undefined,
-        .events = undefined,
     };
 
     try self.snapshot.init(abs_path, gpa, io);
+    errdefer self.snapshot.deinit();
 
-    const arena = self.arena.allocator();
-    errdefer self.arena.deinit();
-
-    self.events = try .init(global.cpu_count, 64, arena);
     self.waker = try core.await(&self.await, handleEvents);
 
-    try self.scanner.init(&core.scheduler, gpa, self.arena.allocator(), io);
+    self.scanner = try Scanner.create(core, &self.snapshot, self.waker);
 }
 
 pub fn deinit(self: *Worktree) void {
-    while (true) {
-        var event = self.events.pop() orelse break;
-        event.deinit();
-    }
-
-    self.scanner.deinit();
     self.snapshot.deinit();
-    self.arena.deinit();
 }
 
 pub fn drop(self: *Worktree) void {
-    if (self.scanner.stop()) {
-        self.any.drop();
-        self.core.cancel(
-            &self.await_c,
-            struct {
-                fn noop(_: *Completion, _: *Loop, _: void) bool {
-                    return false;
-                }
-            }.noop,
-            &self.await,
-        );
-        self.waker.close();
-    } else {
-        self.stopped = true;
-    }
+    self.scanner.stop();
+    self.any.drop();
+    self.core.cancel(
+        &self.await_c,
+        struct {
+            fn noop(_: *Completion, _: *Loop, _: void) bool {
+                return false;
+            }
+        }.noop,
+        &self.await,
+    );
+    self.waker.close();
 }
-
-pub const Event = union(enum) {
-    update: struct {
-        snapshot: Snapshot,
-        scanning: bool,
-    },
-    started,
-
-    pub fn deinit(self: *Event) void {
-        switch (self.*) {
-            .update => |*updated| {
-                updated.snapshot.deinit();
-            },
-            else => {},
-        }
-    }
-};
 
 fn handleEvents(c: *Completion, _: *Loop, res: anyerror!void) bool {
     res catch return false;
@@ -131,7 +91,7 @@ fn handleEvents(c: *Completion, _: *Loop, res: anyerror!void) bool {
     self.core.update();
     defer self.core.endUpdate();
 
-    while (self.events.pop()) |event| {
+    while (self.scanner.events.pop()) |event| {
         switch (event) {
             .started => {
                 log.debug("scanner for path \"{s}\" started", .{self.snapshot.abs_root});
@@ -141,10 +101,6 @@ fn handleEvents(c: *Completion, _: *Loop, res: anyerror!void) bool {
                 self.snapshot.deinit();
                 self.snapshot = updated.snapshot;
                 self.scanning = updated.scanning;
-
-                if (!self.scanning and self.stopped) {
-                    self.drop();
-                }
             },
         }
     }

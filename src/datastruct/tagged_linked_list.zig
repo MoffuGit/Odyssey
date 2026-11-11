@@ -64,6 +64,10 @@ pub fn TaggedLinkedList(comptime T: type) type {
         pub fn pop(self: *@This(), comptime field: Field) ?*Node(field) {
             return self.get(field).pop();
         }
+
+        pub fn is_empty(self: *@This(), comptime field: Field) bool {
+            return self.get(field).is_empty();
+        }
     };
 }
 

@@ -98,15 +98,15 @@ pub fn SlotMap(Value: type) type {
         free_count: usize,
 
         /// Initializes a slot map with the given capacity.
-        pub fn init(gpa: Allocator, capacity: usize) Allocator.Error!@This() {
+        pub fn init(allocator: Allocator, capacity: usize) Allocator.Error!@This() {
             assert(capacity <= std.math.maxInt(Key.Index));
             comptime assert(std.math.maxInt(Key.Index) < std.math.maxInt(usize)); // For `next_index`
 
-            const slots = try gpa.alloc(Slot, capacity);
-            errdefer gpa.free(slots);
+            const slots = try allocator.alloc(Slot, capacity);
+            errdefer allocator.free(slots);
 
-            const free = try gpa.alloc(Key.Index, capacity);
-            errdefer gpa.free(free);
+            const free = try allocator.alloc(Key.Index, capacity);
+            errdefer allocator.free(free);
 
             return .{
                 .capacity = capacity,
@@ -119,9 +119,9 @@ pub fn SlotMap(Value: type) type {
         }
 
         /// Destroys the slot map.
-        pub fn deinit(self: *@This(), gpa: Allocator) void {
-            gpa.free(self.slots);
-            gpa.free(self.free);
+        pub fn deinit(self: *@This(), allocator: Allocator) void {
+            allocator.free(self.slots);
+            allocator.free(self.free);
             self.* = undefined;
         }
 
@@ -137,7 +137,6 @@ pub fn SlotMap(Value: type) type {
             };
         }
 
-        /// Inserts an item into the slot map, returning a persistent unique key.
         pub fn put(self: *@This(), value: Value) error{Overflow}!Key {
             const index: Key.Index = if (self.free_count > 0) b: {
                 self.free_count -= 1;
