@@ -56,6 +56,9 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
         .font_cache = undefined,
     };
 
+    try self.display.init(displayCallback, io);
+    errdefer self.display.deinit();
+
     try self.font_cache.init(gpa);
     errdefer self.font_cache.deinit();
 
@@ -69,9 +72,6 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
 
     try self.scheduler.init(arena, io);
     errdefer self.scheduler.deinit();
-
-    try self.display.init(displayCallback, io);
-    errdefer self.display.deinit();
 
     try self.loop.init(&self.scheduler, io);
     errdefer self.loop.deinit();
@@ -98,13 +98,13 @@ pub fn deinit(self: *App) void {
     };
     self.renderer.deinit();
     self.core.deinit();
-    self.font_cache.deinit();
-    win.deinit();
-    self.scheduler.deinit();
     self.loop.deinit();
+    self.scheduler.deinit();
+    self.arena.deinit();
+    self.font_cache.deinit();
     self.display.deinit();
 
-    self.arena.deinit();
+    win.deinit();
 }
 
 pub fn run(self: *App) !void {
