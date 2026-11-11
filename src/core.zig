@@ -127,15 +127,6 @@ pub fn drop(self: *Core, tag: Tag) void {
     self.dropped.append(dropped);
 }
 
-pub fn update(self: *Core) void {
-    self.pending_updates += 1;
-}
-
-pub fn end(self: *Core) void {
-    self.pending_updates -= 1;
-    if (self.pending_updates == 0) self.flush();
-}
-
 pub fn flush(self: *Core) void {
     if (self.flushing) return;
 
@@ -481,23 +472,15 @@ test "Observe entities" {
 
     var observer: TestObserver = .{};
 
-    {
-        core.update();
-        defer core.end();
-
-        core.notify(observed);
-    }
+    core.notify(observed);
+    core.flush();
 
     try testing.expect(!observer.run);
 
     _ = try core.observe(observed, TestObserver.callback, &observer.observer);
 
-    {
-        core.update();
-        defer core.end();
-
-        core.notify(observed);
-    }
+    core.notify(observed);
+    core.flush();
 
     try testing.expect(observer.run);
 
