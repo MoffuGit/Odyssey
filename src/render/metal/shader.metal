@@ -78,7 +78,7 @@ fragment float4 rectFragmentShader(
     constexpr sampler textureSampler(
         coord::normalized,
         address::clamp_to_edge,
-        filter::linear
+        filter::nearest
     );
 
     float dim = 1.0f;

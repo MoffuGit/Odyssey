@@ -154,8 +154,6 @@ pub fn run(
 
     if (collection.runs.get(.{ .str = str, .size = size })) |cached| return cached.*;
 
-    self.piece_buffer.clearRetainingCapacity();
-
     const context = collection.context;
     context.ShapeBegin(kb.KBTS_DIRECTION_DONT_KNOW, kb.KBTS_LANGUAGE_ENGLISH);
     context.ShapeUtf8(str.ptr, @intCast(str.len), kb.KBTS_USER_ID_GENERATION_MODE_CODEPOINT_INDEX);
@@ -166,23 +164,30 @@ pub fn run(
     var kb_run: kb.kbts_run = undefined;
     while (context.ShapeRun(&kb_run) != 0) {
         const font: *Font = @ptrCast(@alignCast(kb_run.Font.*.UserData));
+        const scale = font.ttf.scaleForPixelHeight(size);
+        const base = font.baseline(scale);
 
         var kb_glyph: [*c]kb.kbts_glyph = undefined;
         while (kb_run.Glyphs.GlyphIteratorNext(&kb_glyph) != 0) {
             const glyph = try self.getGlyph(font.tag, kb_glyph.*.Id, size);
-            const advance_x = kb_glyph.*.AdvanceX;
-            const advance_y = kb_glyph.*.AdvanceY;
+            const advance_x: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.AdvanceX)));
+            const advance_y: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.AdvanceY)));
+            const offset_x: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.OffsetX)));
+            const offset_y: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.OffsetY)));
 
             try self.piece_buffer.append(self.gpa, .{
+                .baseline = base,
                 .rotate = glyph.rotate,
                 .width = glyph.width,
                 .height = glyph.height,
                 .off_x = glyph.off_x,
                 .off_y = glyph.off_y,
+                .offset_x = offset_x * scale,
+                .offset_y = offset_y * scale,
                 .x = glyph.x,
                 .y = glyph.y,
-                .advance_x = @intCast(advance_x),
-                .advance_y = @intCast(advance_y),
+                .advance_x = advance_x * scale,
+                .advance_y = advance_y * scale,
             });
         }
     }
@@ -194,6 +199,7 @@ pub fn run(
         .size = size,
     };
     collection.runs.insert(.{ .str = new.str, .size = size }, new);
+    self.piece_buffer.clearRetainingCapacity();
 
     return new.*;
 }
@@ -282,6 +288,7 @@ const Font = struct {
     kbf: kb.kbts_font,
     status: Status,
     glyphs: HashTable(Glyph.Key, Glyph, Glyph.Context),
+    metrics: TrueType.VerticalMetrics,
 
     pub fn init(self: *Font, data: *Data, index: u32, tag: Tag, arena: Allocator) !void {
         self.* = .{
@@ -291,6 +298,7 @@ const Font = struct {
             .kbf = undefined,
             .glyphs = undefined,
             .status = .invalid,
+            .metrics = undefined,
         };
 
         if (data.status != .loaded) return;
@@ -309,8 +317,13 @@ const Font = struct {
 
         self.kbf.UserData = self;
         self.status = .loaded;
+        self.metrics = self.ttf.verticalMetrics();
 
         try self.glyphs.init(1028, .{}, arena);
+    }
+
+    pub fn baseline(self: *Font, scale: f32) f32 {
+        return self.metrics.ascent * scale;
     }
 
     pub const Context = struct {
@@ -455,10 +468,13 @@ const Piece = struct {
     height: u32,
     off_x: i16,
     off_y: i16,
+    offset_x: f32,
+    offset_y: f32,
     x: u32,
     y: u32,
-    advance_x: u32,
-    advance_y: u32,
+    advance_x: f32,
+    advance_y: f32,
+    baseline: f32,
 };
 
 pub const Run = struct {

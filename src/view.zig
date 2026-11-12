@@ -123,11 +123,17 @@ pub fn displayString(str: []const u8) []const u8 {
 
 pub fn setDisplayString(self: *View, block: *Block, str: []const u8) void {
     const arena = self.frameArena();
-    block.string = arena.dupe(u8, str) catch return;
+
+    const dupe = arena.dupe(u8, str) catch return;
+    const display = displayString(str);
+
+    block.string = dupe;
+    if (display.len == 0) return;
+
     block.run = self.font_cache.run(
         block.font,
         block.font_size,
-        displayString(str),
+        display,
     ) catch |err| {
         log.err("Run err={}", .{err});
         return;
@@ -158,7 +164,7 @@ pub fn begin(self: *View, window: Window, resize: bool, fnt: u64) !void {
     self.pushAttr(.{ .width = .fit });
     self.pushAttr(.{ .height = .fit });
     self.pushAttr(.{ .font = fnt });
-    self.pushAttr(.{ .font_size = 12.0 });
+    self.pushAttr(.{ .font_size = 32.0 });
 }
 
 pub fn finish(self: *View) void {

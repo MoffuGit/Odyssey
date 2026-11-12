@@ -309,11 +309,38 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
                 });
             }
 
-            // if (box.flags.text) {
-            //     if (box.run) |r| {
-            //         const piece = r.pieces[0];
-            //     }
-            // }
+            if (box.flags.text) {
+                if (box.run) |r| {
+                    var cursor_x: f32 = rect[0];
+                    var cursor_y: f32 = rect[1];
+                    for (r.pieces) |piece| {
+                        const x = cursor_x + piece.offset_x + piece.off_x;
+
+                        const y = cursor_y + piece.baseline - piece.offset_y + piece.off_y;
+                        const width: f32 = @floatFromInt(piece.width);
+                        const height: f32 = @floatFromInt(piece.height);
+
+                        try frame.rect(&self.renderer, .{
+                            .position = .{ x, y, x + width, y + height },
+                            .color_0 = .{ 1.0, 0.0, 0.0, 1.0 },
+                            .color_1 = .{ 1.0, 0.0, 0.0, 1.0 },
+                            .color_2 = .{ 1.0, 0.0, 0.0, 1.0 },
+                            .color_3 = .{ 1.0, 0.0, 0.0, 1.0 },
+                            .corner_rads = @splat(0.0),
+                            .src_position = .{
+                                @floatFromInt(piece.x),
+                                @floatFromInt(piece.y),
+                                @floatFromInt(piece.x + piece.width),
+                                @floatFromInt(piece.y + piece.height),
+                            },
+                            .style = .{ .omit_src = 0.0 },
+                        });
+
+                        cursor_x += piece.advance_x;
+                        cursor_y -= piece.advance_y;
+                    }
+                }
+            }
         }
 
         render.render(&self.renderer, &ws.handle, frame, resize);
