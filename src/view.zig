@@ -14,11 +14,11 @@ const datastruct = @import("datastruct.zig");
 const HashTable = datastruct.HashTable;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 const TaggedLinkedList = datastruct.TaggedLinkedList;
+const FontCache = @import("font.zig");
+const Run = FontCache.Run;
 const rng2 = @import("math.zig").rng2;
 const win = @import("window.zig");
 const Window = win.Window;
-const FontCache = @import("font.zig");
-const Run = FontCache.Run;
 
 const log = std.log.scoped(.view);
 

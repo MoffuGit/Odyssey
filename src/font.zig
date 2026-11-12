@@ -7,6 +7,7 @@ const autoHash = std.hash.autoHash;
 const builtin = @import("builtin");
 
 const kb = @import("kb_text");
+const ContextFlag = kb.KBTS_SHAPE_CONTEXT_FLAG_FONT_PRIORITY_BOTTOM_TO_TOP;
 const TrueType = @import("true_type");
 
 const datastruct = @import("datastruct.zig");
@@ -18,8 +19,6 @@ const embedded = @import("embedded.zig");
 const log = std.log.scoped(.font_cache);
 
 const DEFAULT_DPI = if (builtin.os.tag == .macos) 72 else 96;
-const ContextFlag = kb.KBTS_SHAPE_CONTEXT_FLAG_FONT_PRIORITY_BOTTOM_TO_TOP;
-
 pub const Cache = @This();
 
 arena: ArenaAllocator,

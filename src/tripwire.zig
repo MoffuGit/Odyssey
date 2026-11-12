@@ -67,9 +67,9 @@
 //! Either works, its situationally dependent which is better.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const testing = std.testing;
+const builtin = @import("builtin");
 
 const log = std.log.scoped(.tripwire);
 

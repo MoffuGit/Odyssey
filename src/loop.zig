@@ -12,15 +12,15 @@ const Io = std.Io;
 const meta = std.meta;
 const panic = std.debug.panic;
 const Kevent = std.c.kevent64_s;
-const builtin = @import("builtin");
 const atomic = std.atomic;
+const builtin = @import("builtin");
 
 const datastruct = @import("datastruct.zig");
 const Mpsc = datastruct.Mpsc;
 const heap = datastruct.heap;
+const SinglyLinkedList = datastruct.SinglyLinkedList;
 const Scheduler = @import("scheduler.zig");
 const Task = Scheduler.Task;
-const SinglyLinkedList = datastruct.SinglyLinkedList;
 
 const log = std.log.scoped(.loop);
 

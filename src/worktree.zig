@@ -5,9 +5,9 @@ const Io = std.Io;
 const atomic = std.atomic;
 const assert = std.debug.assert;
 
-const Core = @import("core.zig");
 const chunk_pool = @import("chunk_pool.zig");
 const ChunkedPath = @import("chunked_path.zig");
+const Core = @import("core.zig");
 const ent = @import("entity.zig");
 const AnyEntity = ent.AnyEntity;
 const Loop = @import("loop.zig");
