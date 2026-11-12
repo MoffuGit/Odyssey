@@ -117,6 +117,7 @@ pub fn keyFromString(seed: u64, str: []const u8) ?u64 {
 
 pub fn textPosition(self: *View, block: *Block) struct { f32, f32 } {
     const metrics = self.font_cache.metrics(block.font_family, block.font_size) catch return .{ 0.0, 0.0 };
+    const dim = if (block.run) |run| run.dimensions else return .{ 0.0, 0.0 };
 
     var position: [2]f32 = @splat(0.0);
     position[1] = @floor((block.rect[0][1] + block.rect[1][1]) / 2.0 + (metrics.ascent / 2.0 + metrics.descent / 2.0));
@@ -124,11 +125,9 @@ pub fn textPosition(self: *View, block: *Block) struct { f32, f32 } {
     switch (block.text_align) {
         .left => position[0] = block.rect[0][0] + block.text_padding,
         .center => {
-            const dim = block.run.?.dimensions;
             position[0] = @trunc((block.rect[0][0] + block.rect[1][0]) / 2.0 - dim[0] / 2.0);
         },
         .right => {
-            const dim = block.run.?.dimensions;
             position[0] = @trunc(block.rect[1][0] - dim[0] - block.text_padding);
             position[0] = std.math.clamp(position[0], block.rect[0][0], block.rect[1][0]);
         },
