@@ -18,13 +18,13 @@ struct RectOutput {
     float4  position            [[position]];
     float4  color;
     float2  sdf_pos;
+    float2  uv;
     float4  src_bounds          [[flat]];
     float2  half_size           [[flat]];
     float   radius              [[flat]];
     float   border_thickness    [[flat]];
     float   softness            [[flat]];
     float   omit_src            [[flat]];
-    float   rotate_src          [[flat]];
 };
 
 struct Uniforms {
@@ -65,6 +65,9 @@ vertex RectOutput rectVertexShader(
         in.color_3
     );
 
+    float2 uv = vertices[v_id] * 0.5f + 0.5f;
+    uv = mix(uv, uv.yx, in.style.w);
+
     RectOutput out;
 
     out.position = float4(
@@ -80,13 +83,11 @@ vertex RectOutput rectVertexShader(
     out.border_thickness = in.style.x;
     out.softness = in.style.y;
     out.omit_src = in.style.z;
-    out.rotate_src = in.style.w;
-
     out.radius = in.corner_rads[v_id];
     out.color = colors[v_id];
-
     out.half_size = half_size;
     out.sdf_pos = vertices[v_id] * half_size;
+    out.uv = uv;
 
     return out;
 }
@@ -104,20 +105,10 @@ fragment float4 rectFragmentShader(
     float dim = 1.0f;
 
     if (in.omit_src < 1.0f) {
-
-        // UV coordinates inside the destination rectangle.
-        float2 uv = in.sdf_pos / (in.half_size * 2.0f) + 0.5f;
-
-
-        if (in.rotate_src == 1.0f) {
-            uv = float2(uv.y, uv.x);
-        }
-
-        // Transform UVs into the original atlas rectangle.
         float2 sample_uv = mix(
             in.src_bounds.xy,
             in.src_bounds.zw,
-            uv
+            in.uv
         );
 
         dim = texture.sample(textureSampler, sample_uv).r;
