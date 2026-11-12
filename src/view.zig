@@ -116,11 +116,24 @@ pub fn keyFromString(seed: u64, str: []const u8) ?u64 {
 }
 
 pub fn textPosition(self: *View, block: *Block) struct { f32, f32 } {
-    const metrics = self.font_cache.metrics(block.font, block.font_size) catch return .{ 0.0, 0.0 };
+    const metrics = self.font_cache.metrics(block.font_family, block.font_size) catch return .{ 0.0, 0.0 };
 
-    const y = @floor((block.rect[0][1] + block.rect[1][1]) / 2.0) + (metrics.ascent / 2.0 + metrics.descent / 2.0);
-    const x = block.rect[0][0];
-    return .{ x, y };
+    var position: [2]f32 = @splat(0.0);
+    position[1] = @floor((block.rect[0][1] + block.rect[1][1]) / 2.0 + (metrics.ascent / 2.0 + metrics.descent / 2.0));
+
+    switch (block.text_align) {
+        .left => position[0] = block.rect[0][0] + block.text_padding,
+        .center => {
+            const dim = block.run.?.dimensions;
+            position[0] = @trunc((block.rect[0][0] + block.rect[1][0]) / 2.0 - dim[0] / 2.0);
+        },
+        .right => {
+            const dim = block.run.?.dimensions;
+            position[0] = @trunc(block.rect[1][0] - dim[0] - block.text_padding);
+            position[0] = std.math.clamp(position[0], block.rect[0][0], block.rect[1][0]);
+        },
+    }
+    return .{ position[0], position[1] };
 }
 
 pub fn displayString(str: []const u8) []const u8 {
@@ -139,7 +152,7 @@ pub fn setDisplayString(self: *View, block: *Block, str: []const u8) void {
     if (display.len == 0) return;
 
     block.run = self.font_cache.run(
-        block.font,
+        block.font_family,
         block.font_size,
         display,
     ) catch |err| {
@@ -171,7 +184,7 @@ pub fn begin(self: *View, window: Window, resize: bool, fnt: u64) !void {
 
     self.pushAttr(.{ .width = .fit });
     self.pushAttr(.{ .height = .fit });
-    self.pushAttr(.{ .font = fnt });
+    self.pushAttr(.{ .font_family = fnt });
     self.pushAttr(.{ .font_size = 32.0 });
 }
 
@@ -433,16 +446,24 @@ pub fn rounded(self: *View, radius: f32) void {
     self.nextAttr(.{ .radius = @splat(radius) });
 }
 
-pub fn font(self: *View, value: u64) void {
-    self.nextAttr(.{ .font = value });
+pub fn fontFamily(self: *View, value: u64) void {
+    self.nextAttr(.{ .font_family = value });
 }
 
 pub fn fontSize(self: *View, value: f32) void {
     self.nextAttr(.{ .font_size = value });
 }
 
-pub fn foreground(self: *View, value: [4]f32) void {
-    self.nextAttr(.{ .foreground = value });
+pub fn textColor(self: *View, value: [4]f32) void {
+    self.nextAttr(.{ .text_color = value });
+}
+
+pub fn textAlign(self: *View, value: TextAlign) void {
+    self.nextAttr(.{ .text_align = value });
+}
+
+pub fn textPadding(self: *View, value: f32) void {
+    self.nextAttr(.{ .text_padding = value });
 }
 
 pub fn size(self: *View, sizing: Sizing) void {
@@ -528,8 +549,10 @@ pub const Attribute = union(enum) {
     thickness: f32,
     padding: struct { Sizing, f32 },
     font_size: f32,
-    font: u64,
-    foreground: [4]f32,
+    font_family: u64,
+    text_color: [4]f32,
+    text_align: TextAlign,
+    text_padding: f32,
 };
 
 const Stacks = TaggedLinkedList(Attribute);
@@ -563,6 +586,8 @@ const Cached = struct {
     prev: ?*Cached,
 };
 
+pub const TextAlign = enum { left, center, right };
+
 pub const Axis = enum(u1) { x = 0, y = 1 };
 
 pub const Sizing = union(enum) {
@@ -570,6 +595,7 @@ pub const Sizing = union(enum) {
     pub const grow: Sizing = .{ .percent = 1 };
 
     fit,
+    text: f32,
     fixed: f32,
     percent: f32,
 };
@@ -611,8 +637,10 @@ pub const Block = struct {
     flags: Flags,
     radius: [4]f32,
     font_size: f32,
-    font: u64,
-    foreground: [4]f32,
+    font_family: u64,
+    text_color: [4]f32,
+    text_align: TextAlign,
+    text_padding: f32,
     string: ?[]const u8,
     run: ?Run,
 
@@ -633,9 +661,11 @@ pub const Block = struct {
     const FlagBits = @typeInfo(Flags).@"struct".backing_integer.?;
 
     pub const empty: Block = .{
+        .text_padding = 0.0,
+        .text_align = .left,
         .run = null,
         .string = null,
-        .font = 0,
+        .font_family = 0,
         .font_size = 0.0,
         .rect = @splat(@splat(0.0)),
         .cached = ._null,
@@ -649,7 +679,7 @@ pub const Block = struct {
         .sizing = @splat(.none),
         .shrink = @splat(0.0),
         .color = @splat(0.0),
-        .foreground = @splat(0.0),
+        .text_color = @splat(0.0),
         .flags = .{},
         .size = @splat(0.0),
         .position = @splat(0.0),
@@ -672,8 +702,10 @@ pub const Block = struct {
         if (view.stacks.get(.height).head) |node| self.sizing[1] = node.value;
         if (view.stacks.get(.radius).head) |node| self.radius = node.value;
         if (view.stacks.get(.font_size).head) |node| self.font_size = node.value;
-        if (view.stacks.get(.font).head) |node| self.font = node.value;
-        if (view.stacks.get(.foreground).head) |node| self.foreground = node.value;
+        if (view.stacks.get(.font_family).head) |node| self.font_family = node.value;
+        if (view.stacks.get(.text_color).head) |node| self.text_color = node.value;
+        if (view.stacks.get(.text_align).head) |node| self.text_align = node.value;
+        if (view.stacks.get(.text_padding).head) |node| self.text_padding = node.value;
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
         if (view.stacks.get(.height_shrink).head) |node| self.shrink[1] = clamp(node.value, 0.0, 1.0);
 
@@ -742,6 +774,14 @@ pub const Block = struct {
         while (block) |current| : (block = current.nextPre()) {
             switch (current.sizing[axis]) {
                 .fixed => |fixed| current.size[axis] = fixed,
+                .text => |base| {
+                    if (current.run) |run| {
+                        const dim = run.dimensions;
+                        current.size[axis] = base + dim[axis] + current.text_padding * 2;
+                    } else {
+                        log.warn("Text Sizing without text", .{});
+                    }
+                },
                 else => {},
             }
         }

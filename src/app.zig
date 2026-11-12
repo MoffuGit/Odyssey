@@ -230,12 +230,13 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
         view.height(.grow);
         view.spacer(.{ .fixed = 100 }, 0.0);
 
-        view.shrink(1.0);
-        view.background(.{ 0.0118, 0.00784, 0.00784, 1.0 });
-        view.padding(.grow, 1.0);
-        view.foreground(.{ 1.0, 1.0, 1.0, 1.0 });
-
         {
+            view.shrink(1.0);
+            view.background(.{ 0.0118, 0.00784, 0.00784, 1.0 });
+            view.padding(.grow, 1.0);
+            view.textColor(.{ 1.0, 1.0, 1.0, 1.0 });
+            view.textAlign(.right);
+
             _ = view.blkStr(
                 "zig build run@@@green",
                 .{ .text = true },
@@ -248,12 +249,14 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
             _ = view.blk(.{});
             defer view.blkEnd();
 
-            view.size(.{ .fixed = 100.0 });
+            view.size(.{ .text = 100.0 });
             view.rounded(12.0);
             view.background(.{ 1.0, 0.647, 0.0, 1.0 });
             view.border(2, .{ 1.0, 0.0, 0.0, 1.0 });
+            view.textColor(.{ 1.0, 0.0, 0.0, 1.0 });
+            view.textAlign(.center);
 
-            if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
+            if (view.button("Hello@@@orange").clicked) log.debug("orange got clicked", .{});
         }
 
         view.background(.{ 0.0, 0.0, 1.0, 1.0 });
@@ -328,10 +331,10 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
 
                     try frame.rect(&self.renderer, .{
                         .position = .{ x, y, x + width, y + height },
-                        .color_0 = block.foreground,
-                        .color_1 = block.foreground,
-                        .color_2 = block.foreground,
-                        .color_3 = block.foreground,
+                        .color_0 = block.text_color,
+                        .color_1 = block.text_color,
+                        .color_2 = block.text_color,
+                        .color_3 = block.text_color,
                         .src_position = position,
                         .style = .{
                             .omit_src = 0.0,
