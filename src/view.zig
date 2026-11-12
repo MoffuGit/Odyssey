@@ -775,12 +775,8 @@ pub const Block = struct {
             switch (current.sizing[axis]) {
                 .fixed => |fixed| current.size[axis] = fixed,
                 .text => |base| {
-                    if (current.run) |run| {
-                        const dim = run.dimensions;
-                        current.size[axis] = base + dim[axis] + current.text_padding * 2;
-                    } else {
-                        log.warn("Text Sizing without text", .{});
-                    }
+                    const dim = if (current.run) |run| run.dimensions else .{ 0.0, 0.0 };
+                    current.size[axis] = base + dim[axis] + current.text_padding * 2;
                 },
                 else => {},
             }
