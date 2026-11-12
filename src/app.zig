@@ -62,7 +62,7 @@ pub fn init(self: *App, gpa: Allocator, io: Io) !void {
     try self.font_cache.init(gpa);
     errdefer self.font_cache.deinit();
 
-    const inter = try self.font_cache.fromBytes(embedded.inter, 0);
+    const inter = try self.font_cache.fromBytes(embedded.geist_mono, 0);
     const collection = try self.font_cache.addCollection(&.{inter});
 
     self.collection = collection;
@@ -230,14 +230,15 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
         view.height(.grow);
         view.spacer(.{ .fixed = 100 }, 0.0);
 
-        const green = green: {
-            view.shrink(1.0);
-            view.background(.{ 0.0, 1.0, 0.0, 1.0 });
-            view.padding(.grow, 1.0);
+        view.shrink(1.0);
+        view.background(.{ 0.0118, 0.00784, 0.00784, 1.0 });
+        view.padding(.grow, 1.0);
+        view.foreground(.{ 1.0, 1.0, 1.0, 1.0 });
 
-            const green = view.blkStr(
-                "Hello@@@green",
-                .{ .mouse = true, .text = true },
+        {
+            _ = view.blkStr(
+                "zig build run@@@green",
+                .{ .text = true },
             );
             defer view.blkEnd();
 
@@ -253,12 +254,7 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
             view.border(2, .{ 1.0, 0.0, 0.0, 1.0 });
 
             if (view.button("@@@orange").clicked) log.debug("orange got clicked", .{});
-
-            break :green green;
-        };
-        const green_signal = view.signal(green);
-
-        if (green_signal.hovered) green.color = .{ 0.0, 1.0, 0.5, 1.0 };
+        }
 
         view.background(.{ 0.0, 0.0, 1.0, 1.0 });
         view.height(.grow);
@@ -290,7 +286,6 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
                     .color_2 = box.color,
                     .color_3 = box.color,
                     .corner_rads = box.radius,
-                    .style = .{},
                 });
             }
 
@@ -309,36 +304,43 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
                 });
             }
 
-            if (box.flags.text) {
-                if (box.run) |r| {
-                    var cursor_x: f32 = rect[0];
-                    var cursor_y: f32 = rect[1];
-                    for (r.pieces) |piece| {
-                        const x = cursor_x + piece.offset_x + piece.off_x;
+            if (box.run) |r| {
+                var cursor_x: f32 = rect[0];
+                var cursor_y: f32 = rect[1];
+                for (r.pieces) |piece| {
+                    const x = cursor_x + piece.offset_x + piece.off_x;
 
-                        const y = cursor_y + piece.baseline - piece.offset_y + piece.off_y;
-                        const width: f32 = @floatFromInt(piece.width);
-                        const height: f32 = @floatFromInt(piece.height);
+                    const y = cursor_y + piece.baseline - piece.offset_y + piece.off_y;
+                    const width: f32 = @floatFromInt(piece.width);
+                    const height: f32 = @floatFromInt(piece.height);
 
-                        try frame.rect(&self.renderer, .{
-                            .position = .{ x, y, x + width, y + height },
-                            .color_0 = .{ 1.0, 0.0, 0.0, 1.0 },
-                            .color_1 = .{ 1.0, 0.0, 0.0, 1.0 },
-                            .color_2 = .{ 1.0, 0.0, 0.0, 1.0 },
-                            .color_3 = .{ 1.0, 0.0, 0.0, 1.0 },
-                            .corner_rads = @splat(0.0),
-                            .src_position = .{
-                                @floatFromInt(piece.x),
-                                @floatFromInt(piece.y),
-                                @floatFromInt(piece.x + piece.width),
-                                @floatFromInt(piece.y + piece.height),
-                            },
-                            .style = .{ .omit_src = 0.0 },
-                        });
+                    const position: [4]f32 = if (piece.rotate) .{
+                        @floatFromInt(piece.x),
+                        @floatFromInt(piece.y),
+                        @floatFromInt(piece.x + piece.height),
+                        @floatFromInt(piece.y + piece.width),
+                    } else .{
+                        @floatFromInt(piece.x),
+                        @floatFromInt(piece.y),
+                        @floatFromInt(piece.x + piece.width),
+                        @floatFromInt(piece.y + piece.height),
+                    };
 
-                        cursor_x += piece.advance_x;
-                        cursor_y -= piece.advance_y;
-                    }
+                    try frame.rect(&self.renderer, .{
+                        .position = .{ x, y, x + width, y + height },
+                        .color_0 = box.foreground,
+                        .color_1 = box.foreground,
+                        .color_2 = box.foreground,
+                        .color_3 = box.foreground,
+                        .src_position = position,
+                        .style = .{
+                            .omit_src = 0.0,
+                            .rotate_src = if (piece.rotate) 1.0 else 0.0,
+                        },
+                    });
+
+                    cursor_x += piece.advance_x;
+                    cursor_y -= piece.advance_y;
                 }
             }
         }

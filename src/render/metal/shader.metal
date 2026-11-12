@@ -1,3 +1,4 @@
+
 #include <metal_stdlib>
 
 using namespace metal;
@@ -17,57 +18,76 @@ struct RectOutput {
     float4  position            [[position]];
     float4  color;
     float2  sdf_pos;
-    float2  src_pos;
+    float4  src_bounds          [[flat]];
     float2  half_size           [[flat]];
     float   radius              [[flat]];
     float   border_thickness    [[flat]];
     float   softness            [[flat]];
     float   omit_src            [[flat]];
+    float   rotate_src          [[flat]];
 };
 
 struct Uniforms {
-  float2 viewport_size;
+    float2 viewport_size;
 };
 
 float rect_sdf(float2 pos, float2 base, float rad)
 {
-  return length(max(abs(pos) - base + rad, 0.0f)) - rad;
+    return length(max(abs(pos) - base + rad, 0.0f)) - rad;
 }
 
 vertex RectOutput rectVertexShader(
     uint v_id [[vertex_id]],
     RectInput in [[stage_in]],
-    texture2d<float> texture[[texture(0)]],
+    texture2d<float> texture [[texture(0)]],
     constant Uniforms& uniforms [[buffer(1)]]
 ) {
-    float4x2 vertices = float4x2(float2(1.0f, 1.0f), float2(1.0f, -1.0f), float2(-1.0f, 1.0f), float2(-1.0f, -1.0f));
+    float4x2 vertices = float4x2(
+        float2( 1.0f,  1.0f),
+        float2( 1.0f, -1.0f),
+        float2(-1.0f,  1.0f),
+        float2(-1.0f, -1.0f)
+    );
 
     float2 half_size = (in.position.zw - in.position.xy) / 2.0f;
-    float2 center    = (in.position.zw + in.position.xy) / 2.0f;
-    float2 position  = vertices[v_id] * half_size + center;
+    float2 center = (in.position.zw + in.position.xy) / 2.0f;
+    float2 position = vertices[v_id] * half_size + center;
 
-    float2 src_half_size = (in.src_position.zw - in.src_position.xy) / 2.0f;
-    float2 src_center    = (in.src_position.zw + in.src_position.xy) / 2.0f;
-    float2 src_position  = vertices[v_id] * src_half_size + src_center;
-    float2 texture_size = float2( float(texture.get_width(0)), float(texture.get_height(0)) );
+    float2 texture_size = float2(
+        float(texture.get_width(0)),
+        float(texture.get_height(0))
+    );
 
-    float4x4 colors = float4x4(in.color_0, in.color_1, in.color_2, in.color_3);
+    float4x4 colors = float4x4(
+        in.color_0,
+        in.color_1,
+        in.color_2,
+        in.color_3
+    );
 
     RectOutput out;
+
     out.position = float4(
         2.0f * position.x / uniforms.viewport_size.x - 1.0f,
         2.0f * (1.0f - position.y / uniforms.viewport_size.y) - 1.0f,
         0.0f,
         1.0f
     );
-    out.src_pos = src_position / texture_size;
+
+    // Original texture atlas rectangle, normalized.
+    out.src_bounds = in.src_position / texture_size.xyxy;
+
     out.border_thickness = in.style.x;
     out.softness = in.style.y;
     out.omit_src = in.style.z;
+    out.rotate_src = in.style.w;
+
     out.radius = in.corner_rads[v_id];
     out.color = colors[v_id];
+
     out.half_size = half_size;
     out.sdf_pos = vertices[v_id] * half_size;
+
     return out;
 }
 
@@ -83,32 +103,67 @@ fragment float4 rectFragmentShader(
 
     float dim = 1.0f;
 
-    if(in.omit_src < 1.0f)
-    {
-        dim = texture.sample(textureSampler, in.src_pos).r;
+    if (in.omit_src < 1.0f) {
+
+        // UV coordinates inside the destination rectangle.
+        float2 uv = in.sdf_pos / (in.half_size * 2.0f) + 0.5f;
+
+
+        if (in.rotate_src == 1.0f) {
+            uv = float2(uv.y, uv.x);
+        }
+
+        // Transform UVs into the original atlas rectangle.
+        float2 sample_uv = mix(
+            in.src_bounds.xy,
+            in.src_bounds.zw,
+            uv
+        );
+
+        dim = texture.sample(textureSampler, sample_uv).r;
     }
 
     float border_sdf_t = 1.0f;
-    if(in.border_thickness > 0.0f) {
-        float border_sdf_s = rect_sdf(in.sdf_pos, in.half_size - float2(in.softness * 2.0f, in.softness * 2.0f) - in.border_thickness, max(in.radius - in.border_thickness, 0.0f));
-        border_sdf_t = smoothstep(0.0f, in.softness * 2.0f, border_sdf_s);
+
+    if (in.border_thickness > 0.0f) {
+        float border_sdf_s = rect_sdf(
+            in.sdf_pos,
+            in.half_size - float2(in.softness * 2.0f) - in.border_thickness,
+            max(in.radius - in.border_thickness, 0.0f)
+        );
+
+        border_sdf_t = smoothstep(
+            0.0f,
+            in.softness * 2.0f,
+            border_sdf_s
+        );
     }
 
-    if(border_sdf_t < 0.001f) {
+    if (border_sdf_t < 0.001f) {
         discard_fragment();
     }
 
     float corner_sdf_t = 1.0f;
 
-    if(in.radius > 0.0f) {
-        float corner_sdf = rect_sdf(in.sdf_pos, in.half_size - float2(in.softness * 2.0f, in.softness * 2.0f) , in.radius);
-        corner_sdf_t = 1.0f - smoothstep(0.0f, in.softness * 2.0f, corner_sdf);
+    if (in.radius > 0.0f) {
+        float corner_sdf = rect_sdf(
+            in.sdf_pos,
+            in.half_size - float2(in.softness * 2.0f),
+            in.radius
+        );
+
+        corner_sdf_t = 1.0f - smoothstep(
+            0.0f,
+            in.softness * 2.0f,
+            corner_sdf
+        );
     }
 
     float4 color = in.color;
+
     color.a *= dim;
     color.a *= border_sdf_t;
-    color.a *=  corner_sdf_t;
+    color.a *= corner_sdf_t;
     color.rgb *= color.a;
 
     return color;

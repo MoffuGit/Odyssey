@@ -300,15 +300,15 @@ pub const Rect = extern struct {
     color_1: [4]f32 align(16),
     color_2: [4]f32 align(16),
     color_3: [4]f32 align(16),
-    corner_rads: [4]f32 align(16),
-    style: Style align(16),
+    corner_rads: [4]f32 align(16) = @splat(0.0),
+    style: Style align(16) = .{},
 };
 
 pub const Style = packed struct(u128) {
     border_thickness: f32 = 0.0,
     softness: f32 = 1.0,
     omit_src: f32 = 1.0,
-    _padding: f32 = 0.0,
+    rotate_src: f32 = 0.0,
 };
 
 test {

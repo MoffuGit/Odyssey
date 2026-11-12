@@ -433,6 +433,10 @@ pub fn fontSize(self: *View, value: f32) void {
     self.nextAttr(.{ .font_size = value });
 }
 
+pub fn foreground(self: *View, value: [4]f32) void {
+    self.nextAttr(.{ .foreground = value });
+}
+
 pub fn size(self: *View, sizing: Sizing) void {
     self.width(sizing);
     self.height(sizing);
@@ -517,6 +521,7 @@ pub const Attribute = union(enum) {
     padding: struct { Sizing, f32 },
     font_size: f32,
     font: u64,
+    foreground: [4]f32,
 };
 
 const Stacks = TaggedLinkedList(Attribute);
@@ -599,6 +604,7 @@ pub const Block = struct {
     radius: [4]f32,
     font_size: f32,
     font: u64,
+    foreground: [4]f32,
     string: ?[]const u8,
     run: ?Run,
 
@@ -635,6 +641,7 @@ pub const Block = struct {
         .sizing = @splat(.none),
         .shrink = @splat(0.0),
         .color = @splat(0.0),
+        .foreground = @splat(0.0),
         .flags = .{},
         .size = @splat(0.0),
         .position = @splat(0.0),
@@ -658,6 +665,7 @@ pub const Block = struct {
         if (view.stacks.get(.radius).head) |node| self.radius = node.value;
         if (view.stacks.get(.font_size).head) |node| self.font_size = node.value;
         if (view.stacks.get(.font).head) |node| self.font = node.value;
+        if (view.stacks.get(.foreground).head) |node| self.foreground = node.value;
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
         if (view.stacks.get(.height_shrink).head) |node| self.shrink[1] = clamp(node.value, 0.0, 1.0);
 
