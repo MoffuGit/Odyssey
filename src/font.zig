@@ -152,9 +152,9 @@ pub fn metrics(self: *Cache, key: u64, size: f32) !Metrics {
         if (font.status == .invalid) continue;
         const scale = font.ttf.scaleForPixelHeight(size);
         return .{
-            .ascent = font.metrics.ascent * @as(i16, @intFromFloat(scale)),
-            .descent = font.metrics.descent * @as(i16, @intFromFloat(scale)),
-            .line_gap = font.metrics.line_gap * @as(i16, @intFromFloat(scale)),
+            .ascent = font.metrics.ascent * scale,
+            .descent = font.metrics.descent * scale,
+            .line_gap = font.metrics.line_gap * scale,
         };
     }
 
@@ -183,7 +183,6 @@ pub fn run(
     while (context.ShapeRun(&kb_run) != 0) {
         const font: *Font = @ptrCast(@alignCast(kb_run.Font.*.UserData));
         const scale = font.ttf.scaleForPixelHeight(size);
-        const base = font.baseline(scale);
 
         var kb_glyph: [*c]kb.kbts_glyph = undefined;
         while (kb_run.Glyphs.GlyphIteratorNext(&kb_glyph) != 0) {
@@ -194,7 +193,6 @@ pub fn run(
             const offset_y: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.OffsetY)));
 
             const piece: Piece = .{
-                .baseline = base,
                 .rotate = glyph.rotate,
                 .width = glyph.width,
                 .height = glyph.height,
@@ -357,10 +355,6 @@ const Font = struct {
         try self.glyphs.init(1028, .{}, arena);
     }
 
-    pub fn baseline(self: *Font, scale: f32) f32 {
-        return self.metrics.ascent * scale;
-    }
-
     pub const Context = struct {
         pub fn hash(_: @This(), k: u64) u64 {
             return k;
@@ -509,7 +503,6 @@ const Piece = struct {
     y: u32,
     advance_x: f32,
     advance_y: f32,
-    baseline: f32,
 };
 
 pub const Run = struct {

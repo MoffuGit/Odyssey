@@ -115,6 +115,14 @@ pub fn keyFromString(seed: u64, str: []const u8) ?u64 {
     return key;
 }
 
+pub fn textPosition(self: *View, block: *Block) struct { f32, f32 } {
+    const metrics = self.font_cache.metrics(block.font, block.font_size) catch return .{ 0.0, 0.0 };
+
+    const y = @floor((block.rect[0][1] + block.rect[1][1]) / 2.0) + (metrics.ascent / 2.0 + metrics.descent / 2.0);
+    const x = block.rect[0][0];
+    return .{ x, y };
+}
+
 pub fn displayString(str: []const u8) []const u8 {
     const idx = std.mem.find(u8, str, "@@@") orelse str.len;
 

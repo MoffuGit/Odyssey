@@ -220,9 +220,9 @@ pub fn openWindow(self: *App, opts: win.Options) !void {
 }
 
 pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
-    {
-        const view = &ws.view;
+    const view = &ws.view;
 
+    {
         try view.begin(ws.win, resize, self.collection);
         defer view.finish();
 
@@ -305,12 +305,11 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
             }
 
             if (block.run) |r| {
-                var cursor_x: f32 = rect[0];
-                var cursor_y: f32 = rect[1];
+                var cursor_x, var cursor_y = view.textPosition(block);
 
                 for (r.pieces) |piece| {
                     const x = cursor_x + piece.offset_x + piece.off_x;
-                    const y = cursor_y + piece.baseline + piece.offset_y + piece.off_y;
+                    const y = cursor_y + piece.offset_y + piece.off_y;
 
                     const width: f32 = @floatFromInt(piece.width);
                     const height: f32 = @floatFromInt(piece.height);
