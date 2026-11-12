@@ -144,6 +144,23 @@ pub fn addCollection(self: *Cache, tags: []const Tag) !u64 {
     return key;
 }
 
+pub fn metrics(self: *Cache, key: u64, size: f32) !Metrics {
+    const collection = self.collections.get(key) orelse return error.MissingCollection;
+    var iter = collection.tags.iterator();
+    while (iter.next()) |item| {
+        const font = self.fonts.get(item.tag.font_hash) orelse continue;
+        if (font.status == .invalid) continue;
+        const scale = font.ttf.scaleForPixelHeight(size);
+        return .{
+            .ascent = font.metrics.ascent * @as(i16, @intFromFloat(scale)),
+            .descent = font.metrics.descent * @as(i16, @intFromFloat(scale)),
+            .line_gap = font.metrics.line_gap * @as(i16, @intFromFloat(scale)),
+        };
+    }
+
+    return error.InvalidCollection;
+}
+
 pub fn run(
     self: *Cache,
     key: u64,
@@ -161,6 +178,7 @@ pub fn run(
 
     const arena = self.arena.allocator();
 
+    var dimensions: [2]f32 = @splat(0.0);
     var kb_run: kb.kbts_run = undefined;
     while (context.ShapeRun(&kb_run) != 0) {
         const font: *Font = @ptrCast(@alignCast(kb_run.Font.*.UserData));
@@ -175,7 +193,7 @@ pub fn run(
             const offset_x: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.OffsetX)));
             const offset_y: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.OffsetY)));
 
-            try self.piece_buffer.append(self.gpa, .{
+            const piece: Piece = .{
                 .baseline = base,
                 .rotate = glyph.rotate,
                 .width = glyph.width,
@@ -188,12 +206,18 @@ pub fn run(
                 .y = glyph.y,
                 .advance_x = advance_x * scale,
                 .advance_y = advance_y * scale,
-            });
+            };
+
+            try self.piece_buffer.append(self.gpa, piece);
+
+            dimensions[0] += piece.advance_x;
+            dimensions[1] = @max(dimensions[1], piece.advance_y);
         }
     }
 
     const new = try arena.create(Run);
     new.* = .{
+        .dimensions = dimensions,
         .str = try arena.dupe(u8, str),
         .pieces = try arena.dupe(Piece, self.piece_buffer.items),
         .size = size,
@@ -262,6 +286,12 @@ pub fn getGlyph(self: *Cache, tag: Tag, index: u16, size: f32) !Glyph {
     return glyph.*;
 }
 
+const Metrics = struct {
+    ascent: f32,
+    descent: f32,
+    line_gap: f32,
+};
+
 const Tag = struct {
     font_hash: u64,
     data_hash: u64,
@@ -288,7 +318,7 @@ const Font = struct {
     kbf: kb.kbts_font,
     status: Status,
     glyphs: HashTable(Glyph.Key, Glyph, Glyph.Context),
-    metrics: TrueType.VerticalMetrics,
+    metrics: Metrics,
 
     pub fn init(self: *Font, data: *Data, index: u32, tag: Tag, arena: Allocator) !void {
         self.* = .{
@@ -317,7 +347,12 @@ const Font = struct {
 
         self.kbf.UserData = self;
         self.status = .loaded;
-        self.metrics = self.ttf.verticalMetrics();
+        const ttf_metrics = self.ttf.verticalMetrics();
+        self.metrics = .{
+            .ascent = @floatFromInt(ttf_metrics.ascent),
+            .descent = @floatFromInt(ttf_metrics.descent),
+            .line_gap = @floatFromInt(ttf_metrics.line_gap),
+        };
 
         try self.glyphs.init(1028, .{}, arena);
     }
@@ -488,6 +523,7 @@ pub const Run = struct {
     str: []const u8,
     pieces: []const Piece,
     size: f32,
+    dimensions: [2]f32,
 
     pub const Context = struct {
         pub fn hash(_: @This(), k: Key) u64 {
@@ -528,10 +564,6 @@ const Collection = struct {
 
     pub fn deinit(self: *Collection) void {
         self.context.DestroyShapeContext();
-    }
-
-    pub fn primary(self: *Collection) Tag {
-        return self.tags.head orelse unreachable;
     }
 
     pub fn add(self: *Collection, font: *Font, arena: Allocator) !void {

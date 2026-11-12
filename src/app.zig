@@ -274,43 +274,44 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
         }
 
         var node = ws.view.root;
-        while (node) |box| : (node = box.nextPre()) {
-            const rect = box.rect[0] ++ box.rect[1];
+        while (node) |block| : (node = block.nextPre()) {
+            const rect = block.rect[0] ++ block.rect[1];
 
-            if (box.flags.background) {
+            if (block.flags.background) {
                 try frame.rect(&self.renderer, .{
                     .position = rect,
                     .src_position = undefined,
-                    .color_0 = box.color,
-                    .color_1 = box.color,
-                    .color_2 = box.color,
-                    .color_3 = box.color,
-                    .corner_rads = box.radius,
+                    .color_0 = block.color,
+                    .color_1 = block.color,
+                    .color_2 = block.color,
+                    .color_3 = block.color,
+                    .corner_rads = block.radius,
                 });
             }
 
-            if (box.flags.border) {
+            if (block.flags.border) {
                 try frame.rect(&self.renderer, .{
                     .position = rect,
                     .src_position = undefined,
-                    .color_0 = box.border,
-                    .color_1 = box.border,
-                    .color_2 = box.border,
-                    .color_3 = box.border,
-                    .corner_rads = box.radius,
+                    .color_0 = block.border,
+                    .color_1 = block.border,
+                    .color_2 = block.border,
+                    .color_3 = block.border,
+                    .corner_rads = block.radius,
                     .style = .{
-                        .border_thickness = box.thickness,
+                        .border_thickness = block.thickness,
                     },
                 });
             }
 
-            if (box.run) |r| {
+            if (block.run) |r| {
                 var cursor_x: f32 = rect[0];
                 var cursor_y: f32 = rect[1];
+
                 for (r.pieces) |piece| {
                     const x = cursor_x + piece.offset_x + piece.off_x;
+                    const y = cursor_y + piece.baseline + piece.offset_y + piece.off_y;
 
-                    const y = cursor_y + piece.baseline - piece.offset_y + piece.off_y;
                     const width: f32 = @floatFromInt(piece.width);
                     const height: f32 = @floatFromInt(piece.height);
 
@@ -328,10 +329,10 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
 
                     try frame.rect(&self.renderer, .{
                         .position = .{ x, y, x + width, y + height },
-                        .color_0 = box.foreground,
-                        .color_1 = box.foreground,
-                        .color_2 = box.foreground,
-                        .color_3 = box.foreground,
+                        .color_0 = block.foreground,
+                        .color_1 = block.foreground,
+                        .color_2 = block.foreground,
+                        .color_3 = block.foreground,
                         .src_position = position,
                         .style = .{
                             .omit_src = 0.0,
@@ -340,7 +341,7 @@ pub fn renderWindow(self: *App, ws: *WindowState, resize: bool) !void {
                     });
 
                     cursor_x += piece.advance_x;
-                    cursor_y -= piece.advance_y;
+                    cursor_y += piece.advance_y;
                 }
             }
         }
