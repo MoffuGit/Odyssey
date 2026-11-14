@@ -1,672 +1,802 @@
+//! Core owns every entity of the application: its state, its place in the
+//! interface tree, the memory it allocates, and the subscriptions other
+//! entities make to it.
+//!
+//! - Entities live in a generational slot map and are addressed through
+//!   `Handle(T)`. A handle to a dropped entity stops resolving, even after its
+//!   slot is reused, so entities can safely hold handles to each other.
+//! - Entities form a tree rooted at `Core.root`. A window can own a workspace,
+//!   which owns its topbar and sidebar, and so on. Dropping an entity destroys
+//!   its whole subtree, children before parents.
+//! - Entity state is allocated from size-classed chunk pools. Data whose size
+//!   is only known at runtime (strings, lists) goes into the entity's arena,
+//!   `arenaOf`, which is freed when the entity is destroyed.
+//! - Each entity stores the subscriptions made to it. A subscription refers to
+//!   its subscriber by key, so a dropped subscriber is skipped and pruned
+//!   instead of leaving a dangling pointer. `emit` reaches every subscriber;
+//!   `send` reaches the one subscription whose id it is given.
+//! - `emit`, `send`, `notify` and `drop` only queue work. `flush` delivers queued
+//!   events, including the ones handlers emit while it runs, and then destroys
+//!   dropped entities. Event payloads live in a frame arena that is reset once
+//!   a flush drains every queue.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const Io = std.Io;
 const assert = std.debug.assert;
-const atomic = std.atomic;
-const ArrayList = std.ArrayList;
-const ArenaAllocator = std.heap.ArenaAllocator;
 
-const @"type" = @import("type_id.zig");
-const TypeId = @"type".TypeId;
-const TypeInfo = @"type".TypeInfo;
 const chunk_pool = @import("chunk_pool.zig");
 const ChunkAllocator = chunk_pool.ChunkAllocator;
-const constants = @import("constants.zig");
-const MAX_CONTEXT_SIZE = constants.MAX_CONTEXT_SIZE;
-const MAX_CONTEXT_ALIGN = constants.MAX_CONTEXT_ALIGN;
 const datastruct = @import("datastruct.zig");
-const btree = datastruct.btree;
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const slotmap = datastruct.slotmap;
 const SlotMap = slotmap.SlotMap;
-const subs = @import("subscription.zig");
-const Subscriptions = subs.Subscriptions;
-const typeId = @import("type_id.zig");
-
-const CHUNK_SIZES: []const chunk_pool.Options = &.{
-    .{ .capacity = 100, .chunk_size = 64 },
-    .{ .capacity = 50, .chunk_size = 128 },
-    .{ .capacity = 50, .chunk_size = 256 },
-    .{ .capacity = 50, .chunk_size = 512 },
-    .{ .capacity = 50, .chunk_size = 2048 },
-};
+pub const Key = slotmap.Key;
+const type_id = @import("type_id.zig");
+const TypeId = type_id.TypeId;
+const TypeInfo = type_id.TypeInfo;
 
 const log = std.log.scoped(.core);
+
+const CHUNK_SIZES = [_]u32{ 64, 128, 256, 512, 2048 };
+
+/// Entity state must fit in the biggest chunk class; anything bigger belongs in
+/// the entity's arena.
+pub const MAX_ENTITY_SIZE = CHUNK_SIZES[CHUNK_SIZES.len - 1];
 
 pub const Core = @This();
 
 io: Io,
 gpa: Allocator,
+/// Core-lifetime memory: the entity table and the chunk pools.
 arena: ArenaAllocator,
-evented: SinglyLinkedList(Evented),
-dispatched: SinglyLinkedList(Dispatched),
-deferred: SinglyLinkedList(Deferred),
-dropped: SinglyLinkedList(Dropped),
-store: SlotMap(*anyopaque),
-listeners: Listeners,
-receivers: Receivers,
-observers: Observers,
+/// Entity state and subscriptions, recycled per size class.
 chunks: ChunkAllocator,
+/// Queued events and their payloads, reset when a flush drains every queue.
+frame: ArenaAllocator,
+store: SlotMap(Entity),
+root: Handle(Root),
+events: SinglyLinkedList(Event),
+/// Set by `drop`; the next flush sweeps the tree for entities to destroy.
+sweep_pending: bool,
+/// Orders subscriptions and events, so a subscription only receives events
+/// emitted after it was made.
+seq: u64,
 flushing: bool,
-pending_updates: u8,
-notifications: btree.BPlusSet(Tag, Tag.order),
 
-const Options = struct {};
+pub const Options = struct {
+    /// The max number of entities alive at once, including `root`.
+    capacity: u32 = 256,
+};
 
-pub fn init(self: *Core, gpa: Allocator, io: Io, _: Options) !void {
+pub const Error = Allocator.Error || error{ Overflow, EntityNotFound };
+
+/// A typed reference to an entity.
+pub fn Handle(comptime T: type) type {
+    return struct {
+        pub const Type = T;
+
+        key: Key,
+
+        pub fn get(self: @This(), core: *Core) ?*T {
+            return core.get(self);
+        }
+    };
+}
+
+/// The entity every other entity descends from.
+pub const Root = struct {};
+
+/// Emitted by `notify` when an entity's state changed.
+pub const Changed = struct { key: Key };
+
+pub const Entity = struct {
+    type_id: TypeId,
+    ptr: *anyopaque,
+    arena: ArenaAllocator,
+    parent: Key.Optional = .none,
+    first: Key.Optional = .none,
+    last: Key.Optional = .none,
+    next: Key.Optional = .none,
+    prev: Key.Optional = .none,
+    subs: SinglyLinkedList(Subscription) = .empty,
+    /// The queued `Changed` event, so repeated notifies coalesce into it.
+    changed: ?*Event = null,
+    dropping: bool = false,
+};
+
+pub const Subscription = struct {
+    pub const Id = struct { emitter: Key, id: u64 };
+
+    next: ?*Subscription = null,
+    id: u64,
+    subscriber: Key,
+    event: TypeId,
+    callback: *const fn (*anyopaque, *Core, *const anyopaque) bool,
+    dead: bool = false,
+};
+
+const Event = struct {
+    next: ?*Event = null,
+    emitter: Key,
+    seq: u64,
+    type_id: TypeId,
+    payload: *anyopaque,
+    /// The one subscription id to deliver to, or 0 for every subscriber.
+    target: u64 = 0,
+};
+
+pub fn init(self: *Core, gpa: Allocator, io: Io, opts: Options) !void {
     self.* = .{
-        .flushing = false,
-        .pending_updates = 0,
         .io = io,
-        .notifications = undefined,
-        .observers = undefined,
-        .listeners = undefined,
-        .receivers = undefined,
-        .chunks = undefined,
-        .store = undefined,
         .gpa = gpa,
         .arena = .init(gpa),
-        .evented = .empty,
-        .deferred = .empty,
-        .dropped = .empty,
-        .dispatched = .empty,
+        .chunks = undefined,
+        .frame = .init(gpa),
+        .store = undefined,
+        .root = undefined,
+        .events = .empty,
+        .sweep_pending = false,
+        .seq = 0,
+        .flushing = false,
     };
-
-    const arena = self.arena.allocator();
     errdefer self.arena.deinit();
 
-    self.store = try .init(arena, 100);
-    try self.chunks.init(arena, CHUNK_SIZES);
+    const arena = self.arena.allocator();
 
-    const chunks = self.chunks.allocator();
+    var pools: [CHUNK_SIZES.len]chunk_pool.Options = undefined;
+    for (&pools, CHUNK_SIZES) |*pool, size| {
+        // The smallest class also holds every subscription.
+        const capacity = if (size == CHUNK_SIZES[0]) opts.capacity * 4 else opts.capacity;
+        pool.* = .{ .capacity = capacity, .chunk_size = size };
+    }
 
-    try self.observers.init(chunks);
-    try self.listeners.init(chunks);
-    try self.receivers.init(chunks);
-    try self.notifications.init(chunks);
+    self.store = try .init(arena, opts.capacity);
+    try self.chunks.init(arena, &pools);
+    self.root = try self.insert(.none, Root, .{});
 }
 
 pub fn deinit(self: *Core) void {
     self.flush();
-    self.receivers.deinit();
+    self.destroy(self.root.key);
+    // Deliver or discard whatever the destroyed entities queued on the way out.
+    self.flush();
+    self.frame.deinit();
     self.arena.deinit();
 }
 
-pub fn insert(self: *Core, ptr: anytype) Tag {
-    const Type = @typeInfo(@TypeOf(ptr)).pointer.child;
-
-    const id = self.store.put(ptr) catch @panic("Entities Overflow");
-    return .init(id, TypeInfo.init(Type));
+/// Creates an entity of type `T` as the last child of `parent`, which is a
+/// handle or a key. On error the caller still owns `value`.
+pub fn create(self: *Core, parent: anytype, comptime T: type, value: T) Error!Handle(T) {
+    const parent_key = keyOf(parent);
+    if (self.store.get(parent_key) == null) return error.EntityNotFound;
+    return self.insert(parent_key.toOptional(), T, value);
 }
 
-pub fn get(self: *Core, tag: Tag, T: type) ?*T {
-    assert(TypeInfo.init(T) == tag.type_id);
-
-    const ptr = self.store.get(tag.key) orelse return null;
-    return @ptrCast(@alignCast(ptr.*));
+pub fn get(self: *Core, handle: anytype) ?*@TypeOf(handle).Type {
+    const T = @TypeOf(handle).Type;
+    const entity = self.store.get(handle.key) orelse return null;
+    assert(entity.type_id == TypeInfo.init(T));
+    return @ptrCast(@alignCast(entity.ptr));
 }
 
-pub fn recycle(self: *Core, tag: Tag) void {
-    self.store.recycle(tag.key);
+/// Returns a typed handle when `key` is alive and holds a `T`.
+pub fn cast(self: *Core, key: Key, comptime T: type) ?Handle(T) {
+    const entity = self.store.get(key) orelse return null;
+    if (entity.type_id != TypeInfo.init(T)) return null;
+    return .{ .key = key };
 }
 
-pub fn create(self: *Core, comptime T: type) struct { *T, Tag } {
-    const chunks = self.chunks.allocator();
-    const ptr = chunks.create(T) catch @panic("Chunk Overflow");
-    const tag = self.insert(ptr);
-
-    return .{ ptr, tag };
+/// Memory owned by the entity, freed when it is destroyed.
+pub fn arenaOf(self: *Core, handle: anytype) Error!Allocator {
+    const entity = self.store.get(keyOf(handle)) orelse return error.EntityNotFound;
+    return entity.arena.allocator();
 }
 
-pub fn drop(self: *Core, tag: Tag) void {
-    const chunks = self.chunks.allocator();
-    const dropped = chunks.create(Dropped) catch @panic("Chunk Overflow");
+/// Queues the entity and its subtree for destruction at the next flush. Until
+/// then it stays readable, but its subscriptions stop receiving events.
+pub fn drop(self: *Core, handle: anytype) void {
+    const key = keyOf(handle);
+    assert(key != self.root.key);
 
-    dropped.* = .{ .tag = tag };
-
-    self.dropped.append(dropped);
+    const entity = self.store.get(key) orelse return;
+    entity.dropping = true;
+    self.sweep_pending = true;
 }
 
+pub const Children = struct {
+    core: *Core,
+    next_key: Key.Optional,
+
+    pub fn next(self: *Children) ?Key {
+        const key = self.next_key.unwrap() orelse return null;
+        self.next_key = self.core.store.get(key).?.next;
+        return key;
+    }
+};
+
+pub fn children(self: *Core, parent: anytype) Children {
+    const entity = self.store.get(keyOf(parent));
+    return .{
+        .core = self,
+        .next_key = if (entity) |e| e.first else .none,
+    };
+}
+
+/// Calls `handler` with every `E` that `emitter` emits after this call.
+/// `handler` is `fn (*S, *Core, *const E) bool` where `S` is the subscriber's
+/// type, and may return an error union. Returning false unsubscribes; an error
+/// is logged and keeps the subscription.
+pub fn subscribe(
+    self: *Core,
+    emitter: anytype,
+    subscriber: anytype,
+    comptime E: type,
+    comptime handler: anytype,
+) Error!Subscription.Id {
+    const S = @TypeOf(subscriber).Type;
+
+    const Erased = struct {
+        fn callback(ptr: *anyopaque, core: *Core, payload: *const anyopaque) bool {
+            const result = handler(
+                @as(*S, @ptrCast(@alignCast(ptr))),
+                core,
+                @as(*const E, @ptrCast(@alignCast(payload))),
+            );
+
+            return switch (@typeInfo(@TypeOf(result))) {
+                .error_union => result catch |err| {
+                    log.err("{s} handler for {s} failed: {}", .{ @typeName(S), @typeName(E), err });
+                    return true;
+                },
+                else => result,
+            };
+        }
+    };
+
+    const emitter_key = keyOf(emitter);
+    const entity = self.store.get(emitter_key) orelse return error.EntityNotFound;
+    if (self.store.get(subscriber.key) == null) return error.EntityNotFound;
+
+    const sub = try self.chunks.allocator().create(Subscription);
+    sub.* = .{
+        .id = self.nextSeq(),
+        .subscriber = subscriber.key,
+        .event = TypeInfo.init(E),
+        .callback = Erased.callback,
+    };
+    entity.subs.append(sub);
+
+    return .{ .emitter = emitter_key, .id = sub.id };
+}
+
+pub fn unsubscribe(self: *Core, id: Subscription.Id) void {
+    const entity = self.store.get(id.emitter) orelse return;
+
+    var prev: ?*Subscription = null;
+    var node = entity.subs.head;
+    while (node) |sub| : ({
+        prev = sub;
+        node = sub.next;
+    }) {
+        if (sub.id != id.id) continue;
+
+        // A flush may be walking this list; it unlinks dead subscriptions.
+        if (self.flushing) {
+            sub.dead = true;
+        } else {
+            self.removeSub(entity, prev, sub);
+        }
+        return;
+    }
+}
+
+/// Queues `event` for the subscribers of `emitter`. Once delivered, the
+/// payload is deinitialized if `E` has a `deinit`. On error the caller still
+/// owns `event`.
+pub fn emit(self: *Core, emitter: anytype, comptime E: type, event: E) Allocator.Error!void {
+    try self.queue(keyOf(emitter), 0, E, event);
+}
+
+/// Queues `event` for the one subscription `id`, which must be subscribed to
+/// `E`. Nothing is delivered if that subscription or its subscriber is gone by
+/// the next flush. The payload is deinitialized like an emitted one.
+pub fn send(self: *Core, id: Subscription.Id, comptime E: type, event: E) Allocator.Error!void {
+    try self.queue(id.emitter, id.id, E, event);
+}
+
+fn queue(self: *Core, emitter: Key, target: u64, comptime E: type, event: E) Allocator.Error!void {
+    const frame = self.frame.allocator();
+
+    const payload = try frame.create(E);
+    payload.* = event;
+
+    const node = try frame.create(Event);
+    node.* = .{
+        .emitter = emitter,
+        .seq = self.nextSeq(),
+        .type_id = TypeInfo.init(E),
+        .payload = payload,
+        .target = target,
+    };
+    self.events.append(node);
+}
+
+/// Queues a `Changed` event for `handle`. Notifies before the next flush
+/// coalesce into one event.
+pub fn notify(self: *Core, handle: anytype) Allocator.Error!void {
+    const key = keyOf(handle);
+    const entity = self.store.get(key) orelse return;
+
+    if (entity.changed) |pending| {
+        pending.seq = self.nextSeq();
+        return;
+    }
+
+    try self.emit(key, Changed, .{ .key = key });
+    entity.changed = self.events.tail;
+}
+
+/// Delivers queued events, then destroys dropped entities, until both queues
+/// are empty.
 pub fn flush(self: *Core) void {
     if (self.flushing) return;
 
     self.flushing = true;
     defer self.flushing = false;
 
+    while (true) {
+        if (self.events.pop()) |event| {
+            self.deliver(event);
+        } else if (self.sweep_pending) {
+            self.sweep_pending = false;
+            self.sweep(self.root.key);
+        } else break;
+    }
+
+    _ = self.frame.reset(.retain_capacity);
+}
+
+fn insert(self: *Core, parent: Key.Optional, comptime T: type, value: T) Error!Handle(T) {
+    comptime assert(@sizeOf(T) <= MAX_ENTITY_SIZE);
+
     const chunks = self.chunks.allocator();
+    const ptr = try chunks.create(T);
+    errdefer chunks.destroy(ptr);
+    ptr.* = value;
 
-    while (self.deferred.pop()) |deferred| {
-        deferred.callback(deferred.context);
-        chunks.destroy(deferred);
+    const key = try self.store.put(.{
+        .type_id = TypeInfo.init(T),
+        .ptr = ptr,
+        .arena = .init(self.gpa),
+    });
+
+    if (parent.unwrap()) |parent_key| self.link(parent_key, key);
+
+    return .{ .key = key };
+}
+
+fn link(self: *Core, parent_key: Key, key: Key) void {
+    const parent = self.store.get(parent_key).?;
+    const entity = self.store.get(key).?;
+
+    entity.parent = parent_key.toOptional();
+    entity.prev = parent.last;
+
+    if (parent.last.unwrap()) |last| {
+        self.store.get(last).?.next = key.toOptional();
+    } else {
+        parent.first = key.toOptional();
+    }
+    parent.last = key.toOptional();
+}
+
+fn unlink(self: *Core, key: Key) void {
+    const entity = self.store.get(key).?;
+    const parent = self.store.get(entity.parent.unwrap() orelse return).?;
+
+    if (entity.prev.unwrap()) |prev| {
+        self.store.get(prev).?.next = entity.next;
+    } else {
+        parent.first = entity.next;
     }
 
-    while (self.dropped.pop()) |dropped| {
-        const tag = dropped.tag;
-        const ptr = if (self.store.get(tag.key)) |ptr| ptr.* else {
-            log.warn("Tag drop does not exist: {}", .{tag});
-            continue;
-        };
-
-        self.listeners.remove(tag);
-        self.receivers.remove(tag);
-        self.observers.remove(tag);
-
-        tag.type_id.deinit(ptr);
-        tag.type_id.destroy(ptr, chunks);
-
-        self.recycle(tag);
-        chunks.destroy(dropped);
+    if (entity.next.unwrap()) |next| {
+        self.store.get(next).?.prev = entity.prev;
+    } else {
+        parent.last = entity.prev;
     }
 
-    var notifications = self.notifications.iter();
-    while (notifications.next()) |id| {
-        self.observers.notifyAll(id, .{ self, id });
-    }
+    entity.parent = .none;
+    entity.prev = .none;
+    entity.next = .none;
+}
 
-    self.notifications.clear(self.chunks.allocator());
+fn deliver(self: *Core, event: *Event) void {
+    defer event.type_id.deinit(event.payload);
 
-    while (!self.evented.is_empty() or !self.dispatched.is_empty()) {
-        while (self.evented.pop()) |event| {
-            self.listeners.notifyAll(
-                event.tag,
-                .{ self, event.ptr, event.type },
-            );
+    const emitter = self.store.get(event.emitter) orelse return;
+    if (emitter.changed == event) emitter.changed = null;
 
-            event.destroy(chunks);
-            chunks.destroy(event);
+    var prev: ?*Subscription = null;
+    var node = emitter.subs.head;
+    while (node) |sub| {
+        var keep = !sub.dead;
+
+        if (keep) {
+            if (self.store.get(sub.subscriber)) |subscriber| {
+                const targeted = event.target == sub.id;
+                assert(!targeted or sub.event == event.type_id);
+
+                if ((event.target == 0 or targeted) and
+                    sub.event == event.type_id and
+                    sub.id < event.seq and
+                    !subscriber.dropping)
+                {
+                    keep = sub.callback(subscriber.ptr, self, event.payload);
+                }
+            } else {
+                keep = false;
+            }
         }
 
-        while (self.dispatched.pop()) |event| {
-            const reach = self.receivers.notify(
-                event.key,
-                event.id,
-                .{ self, event.ptr, event.type },
-            );
+        // Read after the callback: it may have appended a subscription.
+        node = sub.next;
 
-            if (!reach) event.deinit();
-
-            event.destroy(chunks);
-            chunks.destroy(event);
+        if (keep and !sub.dead) {
+            prev = sub;
+        } else {
+            self.removeSub(emitter, prev, sub);
         }
     }
 }
 
-pub fn observe(
-    self: *Core,
-    entity: anytype,
-    function: anytype,
-    observer: *Observer,
-) !void {
-    const T = @typeInfo(@TypeOf(entity)).pointer.child;
+fn removeSub(self: *Core, entity: *Entity, prev: ?*Subscription, sub: *Subscription) void {
+    if (prev) |p| p.next = sub.next else entity.subs.head = sub.next;
+    if (entity.subs.tail == sub) entity.subs.tail = prev;
 
-    const TypeErased = struct {
-        fn _callback(sub: *Observer, core: *Core, tag: Tag) bool {
-            const ptr = core.get(tag, T) orelse return false;
+    self.chunks.allocator().destroy(sub);
+}
 
-            return @call(
-                .always_inline,
-                function,
-                .{ sub, core, ptr },
-            );
+fn sweep(self: *Core, key: Key) void {
+    var child = self.store.get(key).?.first;
+    while (child.unwrap()) |child_key| {
+        const entity = self.store.get(child_key).?;
+        child = entity.next;
+
+        if (entity.dropping) {
+            self.destroy(child_key);
+        } else {
+            self.sweep(child_key);
         }
-    };
-
-    try self.observers.insert(
-        entity.tag,
-        TypeErased._callback,
-        observer,
-    );
-
-    self.@"defer"(Observer, Observer.enable, observer);
+    }
 }
 
-pub fn notify(self: *Core, entity: anytype) void {
-    _ = self.notifications.insert(self.chunks.allocator(), entity.tag) catch |err| {
-        log.err("We cannot notify, err: {}", .{err});
-    };
-}
+/// Destroys children first, so an entity can still read its parent from its
+/// `deinit`.
+fn destroy(self: *Core, key: Key) void {
+    const entity = self.store.get(key) orelse return;
 
-pub fn @"defer"(
-    self: *Core,
-    comptime T: type,
-    comptime function: *const fn (*T) void,
-    data: *T,
-) void {
+    while (entity.first.unwrap()) |child| self.destroy(child);
+
+    self.unlink(key);
+    entity.type_id.deinit(entity.ptr);
+
     const chunks = self.chunks.allocator();
-    const deferred = chunks.create(Deferred) catch @panic("Deferred Overflow");
+    while (entity.subs.pop()) |sub| chunks.destroy(sub);
+    entity.arena.deinit();
+    entity.type_id.destroy(entity.ptr, chunks);
 
-    const TypeErased = struct {
-        fn callback(ptr: *anyopaque) void {
-            const d: *T = @ptrCast(@alignCast(ptr));
-
-            @call(.always_inline, function, .{d});
-        }
-    };
-
-    deferred.* = .{
-        .callback = TypeErased.callback,
-        .context = data,
-    };
-
-    self.deferred.append(deferred);
+    _ = self.store.remove(key);
 }
 
-pub fn receive(
-    self: *Core,
-    entity: anytype,
-    comptime E: type,
-    function: anytype,
-    receiver: *Receiver,
-) !void {
-    const TypeErased = struct {
-        fn _callback(sub: *Receiver, core: *Core, ptr: *anyopaque, _type: TypeId) bool {
-            if (TypeInfo.init(E) != _type) @panic("Receiver subscription event type mismatch");
-            const event: *E = @ptrCast(@alignCast(ptr));
-            return @call(.always_inline, function, .{ sub, core, event });
-        }
-    };
-
-    try self.receivers.insert(
-        entity.tag,
-        TypeErased._callback,
-        receiver,
-    );
-
-    self.@"defer"(Receiver, Receiver.enable, receiver);
+fn nextSeq(self: *Core) u64 {
+    self.seq += 1;
+    return self.seq;
 }
 
-pub fn listen(
-    self: *Core,
-    entity: anytype,
-    comptime E: type,
-    function: anytype,
-    listener: *Listener,
-) !void {
-    const TypeErased = struct {
-        fn _callback(sub: *Listener, core: *Core, ptr: *anyopaque, _type: TypeId) bool {
-            if (TypeInfo.init(E) != _type) return true;
-            const event: *E = @ptrCast(@alignCast(ptr));
-            return @call(.always_inline, function, .{ sub, core, event });
-        }
-
-        fn enable(core: *Core, sub: Listener) void {
-            core.listeners.enable(sub);
-        }
-    };
-
-    try self.listeners.insert(
-        entity.tag,
-        TypeErased._callback,
-        listener,
-    );
-
-    self.@"defer"(Listener, Listener.enable, listener);
+fn keyOf(value: anytype) Key {
+    return if (@TypeOf(value) == Key) value else value.key;
 }
 
-pub fn nevent(self: *Core, entity: anytype, comptime E: type) !*E {
-    const chunk = self.chunks.allocator();
-    const ptr = try chunk.create(E);
-    errdefer chunk.destroy(ptr);
+const testing = std.testing;
 
-    const node = try chunk.create(Evented);
-    node.* = .{
-        .tag = entity.tag,
-        .ptr = ptr,
-        .type = TypeInfo.init(E),
-    };
-
-    self.evented.append(node);
-
-    return ptr;
-}
-
-pub fn dispatch(self: *Core, entity: anytype, id: u32, comptime E: type) !*E {
-    const chunk = self.chunks.allocator();
-    const ptr = try chunk.create(E);
-    errdefer chunk.destroy(ptr);
-
-    const node = try chunk.create(Dispatched);
-
-    node.* = .{
-        .key = entity.tag,
-        .id = id,
-        .ptr = ptr,
-        .type = TypeInfo.init(E),
-    };
-
-    self.dispatched.append(node);
-
-    return ptr;
-}
-
-pub const Observers = Subscriptions(Tag, @Tuple(&.{ *Core, Tag }), Tag.order);
-
-pub const Observer = Observers.Subscription;
-
-pub const Listeners = Subscriptions(Tag, @Tuple(&.{ *Core, *anyopaque, TypeId }), Tag.order);
-
-pub const Listener = Listeners.Subscription;
-
-pub const Receivers = Subscriptions(Tag, @Tuple(&.{ *Core, *anyopaque, TypeId }), Tag.order);
-
-pub const Receiver = Receivers.Subscription;
-
-pub const Deferred = struct {
-    callback: *const fn (*anyopaque) void,
-    context: *anyopaque,
-    next: ?*Deferred = null,
-};
-
-pub const Evented = struct {
-    tag: Tag,
-    type: TypeId,
-    ptr: *anyopaque,
-    next: ?*Evented = null,
-
-    pub fn destroy(self: *const Evented, chunk: Allocator) void {
-        self.type.deinit(self.ptr);
-        self.type.destroy(self.ptr, chunk);
-    }
-};
-
-pub const Dispatched = struct {
-    key: Receivers.Key,
-    id: u32,
-    type: TypeId,
-    ptr: *anyopaque,
-
-    next: ?*Dispatched = null,
-
-    pub fn deinit(self: *const Dispatched) void {
-        self.type.deinit(self.ptr);
-    }
-
-    pub fn destroy(self: *const Dispatched, chunk: Allocator) void {
-        self.type.destroy(self.ptr, chunk);
-    }
-};
-
-pub const Dropped = struct {
-    tag: Tag,
-    next: ?*Dropped = null,
-};
-
-pub const Tag = struct {
-    const Key = slotmap.Key;
-
-    type_id: TypeId,
-    key: slotmap.Key,
-
-    pub fn init(key: Key, type_id: TypeId) @This() {
-        return .{ .key = key, .type_id = type_id };
-    }
-
-    pub fn order(a: Tag, b: Tag) std.math.Order {
-        const index_order = std.math.order(a.key.index, b.key.index);
-        if (index_order != .eq) return index_order;
-
-        return std.math.order(@backingInt(a.key.generation), @backingInt(b.key.generation));
-    }
-};
-
-const TestStruct = struct {
-    index: usize,
-    tag: Tag,
-};
-
-test "creates/drops entities" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-    const io = testing.io;
+test "a dropped entity's handle stays dead after its slot is reused" {
+    const Value = struct { value: u32 };
 
     var core: Core = undefined;
-    try core.init(allocator, io, .{});
+    try core.init(testing.allocator, testing.io, .{ .capacity = 2 });
     defer core.deinit();
 
-    var tags: [32]Tag = undefined;
-    for (&tags, 0..) |*tag, index| {
-        const ptr, tag.* = core.create(TestStruct);
-
-        ptr.* = .{
-            .index = 0,
-            .tag = tag.*,
-        };
-        ptr.index = index;
-        ptr.index += 1;
-    }
+    const first = try core.create(core.root, Value, .{ .value = 1 });
+    core.drop(first);
+    try testing.expectEqual(1, core.get(first).?.value);
 
     core.flush();
+    try testing.expectEqual(null, core.get(first));
 
-    for (tags, 0..) |tag, index| {
-        try testing.expectEqual(index + 1, core.get(tag, TestStruct).?.index);
-        core.drop(tag);
-    }
-
-    core.flush();
+    const second = try core.create(core.root, Value, .{ .value = 2 });
+    try testing.expectEqual(first.key.index, second.key.index);
+    try testing.expectEqual(null, core.get(first));
+    try testing.expectEqual(2, core.get(second).?.value);
 }
 
-test "Observe entities" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-    const io = testing.io;
-
-    var core: Core = undefined;
-    try core.init(allocator, io, .{});
-    defer core.deinit();
-
-    const observed, const tag = core.create(TestStruct);
-    defer core.drop(tag);
-
-    observed.* = .{ .index = 0, .tag = tag };
-
-    const TestObserver = struct {
-        run: bool = false,
-        observer: Observer = .noop,
-
-        pub fn callback(observer: *Observer, _: *Core, _: *TestStruct) bool {
-            const parent: *@This() = @fieldParentPtr("observer", observer);
-            parent.run = true;
-            return false;
-        }
-    };
-
-    var observer: TestObserver = .{};
-
-    core.notify(observed);
-    core.flush();
-
-    try testing.expect(!observer.run);
-
-    _ = try core.observe(observed, TestObserver.callback, &observer.observer);
-
-    core.notify(observed);
-    core.flush();
-
-    try testing.expect(observer.run);
-
-    core.flush();
-}
-
-test "Listen entities events" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-    const io = testing.io;
-
-    const TestEvent = struct {
-        id: usize,
-    };
-
-    var core: Core = undefined;
-    try core.init(allocator, io, .{});
-    defer core.deinit();
-
-    const listened, const tag = core.create(TestStruct);
-    defer core.drop(tag);
-
-    const TestListener = struct {
-        id: usize = 0,
-        listener: Listener = .noop,
-
-        pub fn callback(listener: *Listener, _: *Core, evt: *TestEvent) bool {
-            const parent: *@This() = @fieldParentPtr("listener", listener);
-            parent.id = evt.id;
-            return false;
-        }
-    };
-
-    var listener: TestListener = .{};
-
-    _ = try core.listen(listened, TestEvent, TestListener.callback, &listener.listener);
-
-    const evt = try core.nevent(listened, TestEvent);
-    evt.* = .{
-        .id = 35,
-    };
-
-    core.flush();
-
-    try testing.expectEqual(listener.id, 35);
-
-    core.flush();
-}
-
-test "Queued receiver event targets a typed subscription" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-    const io = testing.io;
-
-    const TestEvent = struct {
-        value: usize,
-    };
-
-    const TestReceiver = struct {
-        received: usize = 0,
-        receiver: Receiver = .noop,
-
-        pub fn callback(receiver: *Receiver, _: *Core, evt: *TestEvent) bool {
-            const parent: *@This() = @fieldParentPtr("receiver", receiver);
-            parent.received = evt.value;
-            return false;
-        }
-    };
-
-    var core: Core = undefined;
-    try core.init(allocator, io, .{});
-    defer core.deinit();
-
-    const dispatcher, const tag = core.create(TestStruct);
-    defer core.drop(tag);
-
-    dispatcher.* = .{ .index = 0, .tag = tag };
-
-    var receiver: TestReceiver = .{};
-
-    try core.receive(dispatcher, TestEvent, TestReceiver.callback, &receiver.receiver);
-    core.flush();
-
-    const event = try core.dispatch(dispatcher, receiver.receiver.id, TestEvent);
-    event.* = .{ .value = 35 };
-    core.flush();
-
-    try testing.expectEqual(@as(usize, 35), receiver.received);
-    try testing.expectEqual(null, core.receivers.subscribers.get_mut(dispatcher.tag));
-
-    core.flush();
-}
-
-test "Dropping a receiver removes subscriptions before queued delivery" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-    const io = testing.io;
-
-    const TestEvent = struct {
-        deinit_called: *bool,
+test "dropping an entity destroys its subtree, children first" {
+    const Node = struct {
+        id: u8,
+        destroyed: *std.ArrayList(u8),
 
         pub fn deinit(self: *@This()) void {
-            self.deinit_called.* = true;
+            self.destroyed.appendAssumeCapacity(self.id);
         }
     };
 
-    const TestReceiver = struct {
-        received: bool = false,
-        receiver: Receiver = .noop,
+    var buffer: [8]u8 = undefined;
+    var destroyed: std.ArrayList(u8) = .initBuffer(&buffer);
 
-        pub fn callback(receiver: *Receiver, _: *Core, evt: *TestEvent) bool {
-            const parent: *@This() = @fieldParentPtr("receiver", receiver);
-            parent.received = evt.deinit_called.*;
-            return false;
-        }
-    };
+    {
+        var core: Core = undefined;
+        try core.init(testing.allocator, testing.io, .{});
+        defer core.deinit();
 
-    var core: Core = undefined;
-    try core.init(allocator, io, .{});
-    defer core.deinit();
+        // root -> a -> { b, c -> d }, root -> e
+        const a = try core.create(core.root, Node, .{ .id = 'a', .destroyed = &destroyed });
+        _ = try core.create(a, Node, .{ .id = 'b', .destroyed = &destroyed });
+        const c = try core.create(a, Node, .{ .id = 'c', .destroyed = &destroyed });
+        const d = try core.create(c, Node, .{ .id = 'd', .destroyed = &destroyed });
+        _ = try core.create(core.root, Node, .{ .id = 'e', .destroyed = &destroyed });
 
-    const dispatcher, const tag = core.create(TestStruct);
-    var deinit_called = false;
+        // Entity arenas are released with their entity; testing.allocator
+        // reports a leak otherwise.
+        _ = try (try core.arenaOf(c)).alloc(u8, 4096);
 
-    dispatcher.* = .{ .index = 0, .tag = tag };
+        core.drop(a);
+        core.flush();
 
-    var receiver: TestReceiver = .{};
+        try testing.expectEqualStrings("bdca", destroyed.items);
+        try testing.expectEqual(null, core.get(d));
 
-    try core.receive(dispatcher, TestEvent, TestReceiver.callback, &receiver.receiver);
-    core.flush();
+        var remaining = core.children(core.root);
+        try testing.expectEqual('e', core.get(core.cast(remaining.next().?, Node).?).?.id);
+        try testing.expectEqual(null, remaining.next());
+    }
 
-    const event = try core.dispatch(dispatcher, receiver.receiver.id, TestEvent);
-    event.* = .{ .deinit_called = &deinit_called };
-
-    core.drop(tag);
-    core.flush();
-
-    try testing.expect(!receiver.received);
-    try testing.expect(deinit_called);
-    try testing.expectEqual(null, core.receivers.subscribers.get_mut(tag));
+    try testing.expectEqualStrings("bdcae", destroyed.items);
 }
 
-test "Observe entities drop before enable" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-    const io = testing.io;
+test "subscriptions receive matching events emitted after they subscribe" {
+    const Ping = struct {
+        value: u32,
+        deinits: *u32,
 
-    const TestObserver = struct {
-        run: bool = false,
-        observer: Observer = .noop,
+        pub fn deinit(self: *@This()) void {
+            self.deinits.* += 1;
+        }
+    };
+    const Other = struct {};
+    const Emitter = struct {};
+    const Listener = struct {
+        received: *std.ArrayList(u32),
 
-        pub fn callback(observer: *Observer, _: *Core, _: *TestStruct) bool {
-            const parent: *@This() = @fieldParentPtr("observer", observer);
-            parent.run = true;
-            return false;
+        fn onPing(self: *@This(), _: *Core, ping: *const Ping) bool {
+            self.received.appendAssumeCapacity(ping.value);
+            return ping.value != 3;
+        }
+
+        fn onOther(_: *@This(), _: *Core, _: *const Other) bool {
+            unreachable;
         }
     };
 
     var core: Core = undefined;
-    try core.init(allocator, io, .{});
+    try core.init(testing.allocator, testing.io, .{});
     defer core.deinit();
 
-    const observed, const tag = core.create(TestStruct);
+    var buffer: [8]u32 = undefined;
+    var received: std.ArrayList(u32) = .initBuffer(&buffer);
+    var dropped_buffer: [8]u32 = undefined;
+    var dropped_received: std.ArrayList(u32) = .initBuffer(&dropped_buffer);
+    var deinits: u32 = 0;
 
-    observed.* = .{ .index = 0, .tag = tag };
+    const emitter = try core.create(core.root, Emitter, .{});
+    const listener = try core.create(core.root, Listener, .{ .received = &received });
+    const dropped = try core.create(core.root, Listener, .{ .received = &dropped_received });
 
-    var observer: TestObserver = .{};
+    try core.emit(emitter, Ping, .{ .value = 1, .deinits = &deinits });
+    _ = try core.subscribe(emitter, listener, Ping, Listener.onPing);
+    _ = try core.subscribe(emitter, dropped, Ping, Listener.onPing);
+    const other = try core.subscribe(emitter, listener, Other, Listener.onOther);
+    core.unsubscribe(other);
+    core.drop(dropped);
 
-    observed.index = 1;
-
-    core.notify(observed);
-
-    try testing.expect(!observer.run);
-
-    try core.observe(observed, TestObserver.callback, &observer.observer);
-    core.observers.unsubscribe(observed.tag, observer.observer.id);
-
-    observed.index = 2;
-
-    core.notify(observed);
-
+    try core.emit(emitter, Ping, .{ .value = 2, .deinits = &deinits });
+    try core.emit(emitter, Other, .{});
+    try core.emit(emitter, Ping, .{ .value = 3, .deinits = &deinits });
+    try core.emit(emitter, Ping, .{ .value = 4, .deinits = &deinits });
     core.flush();
 
-    try testing.expect(!observer.run);
+    // 1 predates the subscription, and returning false on 3 unsubscribed.
+    try testing.expectEqualSlices(u32, &.{ 2, 3 }, received.items);
+    try testing.expectEqualSlices(u32, &.{}, dropped_received.items);
+    try testing.expectEqual(4, deinits);
 
-    core.drop(tag);
-
+    // The dropped listener's subscription is pruned by the emitter's next event.
+    try core.emit(emitter, Ping, .{ .value = 5, .deinits = &deinits });
     core.flush();
+    try testing.expectEqual(null, core.store.get(emitter.key).?.subs.head);
+}
+
+test "a sent event reaches only its target subscription" {
+    const Ping = struct {
+        value: u32,
+        deinits: *u32,
+
+        pub fn deinit(self: *@This()) void {
+            self.deinits.* += 1;
+        }
+    };
+    const Emitter = struct {};
+    const Listener = struct {
+        received: u32 = 0,
+
+        fn onPing(self: *@This(), _: *Core, ping: *const Ping) bool {
+            self.received = ping.value;
+            return true;
+        }
+    };
+
+    var core: Core = undefined;
+    try core.init(testing.allocator, testing.io, .{});
+    defer core.deinit();
+
+    var deinits: u32 = 0;
+
+    const emitter = try core.create(core.root, Emitter, .{});
+    const first = try core.create(core.root, Listener, .{});
+    const second = try core.create(core.root, Listener, .{});
+    const dropped = try core.create(core.root, Listener, .{});
+
+    _ = try core.subscribe(emitter, first, Ping, Listener.onPing);
+    const second_sub = try core.subscribe(emitter, second, Ping, Listener.onPing);
+    const dropped_sub = try core.subscribe(emitter, dropped, Ping, Listener.onPing);
+
+    try core.send(second_sub, Ping, .{ .value = 7, .deinits = &deinits });
+    core.flush();
+
+    try testing.expectEqual(0, core.get(first).?.received);
+    try testing.expectEqual(7, core.get(second).?.received);
+
+    core.drop(dropped);
+    try core.send(dropped_sub, Ping, .{ .value = 9, .deinits = &deinits });
+    core.flush();
+
+    try testing.expectEqual(0, core.get(first).?.received);
+    try testing.expectEqual(7, core.get(second).?.received);
+    try testing.expectEqual(2, deinits);
+}
+
+test "an emitter's last events reach subscribers before it is destroyed" {
+    const Closed = struct {};
+    const Emitter = struct {};
+    const Listener = struct {
+        closed: u32 = 0,
+        changed: u32 = 0,
+
+        fn onClosed(self: *@This(), _: *Core, _: *const Closed) bool {
+            self.closed += 1;
+            return true;
+        }
+
+        fn onChanged(self: *@This(), _: *Core, _: *const Changed) bool {
+            self.changed += 1;
+            return true;
+        }
+    };
+
+    var core: Core = undefined;
+    try core.init(testing.allocator, testing.io, .{});
+    defer core.deinit();
+
+    const emitter = try core.create(core.root, Emitter, .{});
+    const listener = try core.create(core.root, Listener, .{});
+
+    _ = try core.subscribe(emitter, listener, Closed, Listener.onClosed);
+    _ = try core.subscribe(emitter, listener, Changed, Listener.onChanged);
+
+    try core.notify(emitter);
+    try core.notify(emitter);
+    try core.notify(emitter);
+    try core.emit(emitter, Closed, .{});
+    core.drop(emitter);
+    core.flush();
+
+    try testing.expectEqual(null, core.get(emitter));
+    try testing.expectEqual(1, core.get(listener).?.closed);
+    try testing.expectEqual(1, core.get(listener).?.changed);
+}
+
+test "a workspace declares its interface as an entity tree" {
+    const Topbar = struct { title: []const u8 = "" };
+
+    const Sidebar = struct {
+        const Sidebar = @This();
+        const Selected = struct { index: usize };
+
+        items: []const []const u8 = &.{},
+        selected: ?usize = null,
+
+        fn select(handle: Handle(Sidebar), core: *Core, index: usize) !void {
+            core.get(handle).?.selected = index;
+            try core.emit(handle, Selected, .{ .index = index });
+        }
+    };
+
+    const Workspace = struct {
+        const Workspace = @This();
+
+        topbar: Handle(Topbar),
+        sidebar: Handle(Sidebar),
+
+        fn create(core: *Core, parent: anytype, items: []const []const u8) !Handle(Workspace) {
+            const handle = try core.create(parent, Workspace, undefined);
+            errdefer core.drop(handle);
+
+            const self = core.get(handle).?;
+            self.topbar = try core.create(handle, Topbar, .{});
+            self.sidebar = try core.create(handle, Sidebar, .{});
+
+            const sidebar_arena = try core.arenaOf(self.sidebar);
+            const owned = try sidebar_arena.alloc([]const u8, items.len);
+            for (owned, items) |*item, src| item.* = try sidebar_arena.dupe(u8, src);
+            core.get(self.sidebar).?.items = owned;
+
+            _ = try core.subscribe(self.sidebar, handle, Sidebar.Selected, onSelected);
+            return handle;
+        }
+
+        fn onSelected(self: *Workspace, core: *Core, event: *const Sidebar.Selected) !bool {
+            const item = core.get(self.sidebar).?.items[event.index];
+            core.get(self.topbar).?.title = try (try core.arenaOf(self.topbar)).dupe(u8, item);
+            try core.notify(self.topbar);
+            return true;
+        }
+    };
+
+    const Window = struct {
+        redraws: u32 = 0,
+
+        fn onChanged(self: *@This(), _: *Core, _: *const Changed) bool {
+            self.redraws += 1;
+            return true;
+        }
+    };
+
+    var core: Core = undefined;
+    try core.init(testing.allocator, testing.io, .{});
+    defer core.deinit();
+
+    const window = try core.create(core.root, Window, .{});
+    const workspace = try Workspace.create(&core, window, &.{ "src", "build.zig", "README" });
+    const ws = core.get(workspace).?;
+    _ = try core.subscribe(ws.topbar, window, Changed, Window.onChanged);
+
+    var parts = core.children(workspace);
+    try testing.expectEqual(ws.topbar, core.cast(parts.next().?, Topbar).?);
+    try testing.expectEqual(ws.sidebar, core.cast(parts.next().?, Sidebar).?);
+    try testing.expectEqual(null, parts.next());
+
+    // The sidebar's event and the topbar notify it causes run in one flush.
+    try Sidebar.select(ws.sidebar, &core, 1);
+    core.flush();
+
+    try testing.expectEqualStrings("build.zig", core.get(ws.topbar).?.title);
+    try testing.expectEqual(1, core.get(window).?.redraws);
+
+    const topbar = ws.topbar;
+    core.drop(workspace);
+    core.flush();
+
+    try testing.expectEqual(null, core.get(topbar));
+    try testing.expect(core.get(window) != null);
 }

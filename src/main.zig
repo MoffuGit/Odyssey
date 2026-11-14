@@ -15,7 +15,6 @@ const Loop = @import("loop.zig");
 const patch = @import("patch.zig");
 const render = @import("render.zig");
 const Scheduler = @import("scheduler.zig");
-const subscription = @import("subscription.zig");
 const View = @import("view.zig");
 const win = @import("window.zig");
 
@@ -58,6 +57,5 @@ test {
     _ = chunk_pool;
     _ = chunked_path;
     _ = datastruct;
-    _ = subscription;
     _ = Loop;
 }
