@@ -117,6 +117,8 @@ pub fn get(self: *Core, key: Key) ?*Entity {
 }
 
 pub fn destroy(self: *Core, entity: *Entity) void {
+    const chunks = self.chunks.allocator();
+
     if (entity.parent) |p| {
         p.childrens.remove(entity);
     }
@@ -125,6 +127,7 @@ pub fn destroy(self: *Core, entity: *Entity) void {
     while (iter.next()) |child| self.destroy(child);
 
     entity.arena.deinit();
+    entity.type_id.destroy(entity.ptr, chunks);
 
     self.store.remove(entity.key);
 }
