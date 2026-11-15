@@ -5,70 +5,32 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.slot_map);
 
-pub const Key = packed struct {
-    pub const Generation = enum(u32) {
-        invalid = 0,
-        first = 1,
-        _,
-
-        pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            if (self == .invalid) {
-                try writer.writeAll(".invalid");
-            } else {
-                try writer.print("0x{X}", .{@backingInt(self)});
-            }
-        }
-    };
-    pub const Index = u32;
-
-    /// Similar to `Key`, but may be set to `.none`.
-    pub const Optional = packed struct {
-        pub const none: @This() = .{ .index = 0, .generation = .invalid };
-
-        index: Index,
-        generation: Generation,
-
-        /// Unwraps the optional key into `Key`, or returns `null` if it is `.none`.
-        pub fn unwrap(self: @This()) ?Key {
-            if (self == none) return null;
-            assert(self.generation != .invalid);
-            return .{
-                .index = self.index,
-                .generation = self.generation,
-            };
-        }
-
-        pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            if (self.unwrap()) |key| {
-                try writer.print("{f}", .{key});
-            } else {
-                try writer.writeAll(".none");
-            }
-        }
-
-        pub fn eql(self: @This(), other: @This()) bool {
-            return self.index == other.index and self.generation == other.generation;
-        }
-    };
-
-    /// The key's index. Points to the relevant data.
-    index: Index,
-    /// The key's generation, used to guarantee key uniqueness.
-    generation: Generation,
-
-    /// Returns this key as an optional.
-    pub fn toOptional(self: @This()) Optional {
-        // Invalid is only allowed on optional keys.
-        assert(self.generation != .invalid);
-        return .{
-            .index = self.index,
-            .generation = self.generation,
-        };
-    }
+pub const Generation = enum(u32) {
+    invalid = 0,
+    first = 1,
+    _,
 
     pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        assert(self.generation != .invalid);
-        try writer.print("0x{X}:{X}", .{ self.index, @backingInt(self.generation) });
+        if (self == .invalid) {
+            try writer.writeAll(".invalid");
+        } else {
+            try writer.print("0x{X}", .{@backingInt(self)});
+        }
+    }
+};
+
+pub const Key = packed struct {
+    pub const none: @This() = .{ .index = 0, .generation = .invalid };
+
+    index: u32,
+    generation: Generation,
+
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        if (self.generation == .invalid) {
+            try writer.writeAll(".none");
+        } else {
+            try writer.print("0x{X}:{X}", .{ self.index, @backingInt(self.generation) });
+        }
     }
 
     pub fn eql(self: @This(), other: @This()) bool {
@@ -78,34 +40,28 @@ pub const Key = packed struct {
 
 pub fn SlotMap(Value: type) type {
     return struct {
-        /// A persistent `SlotMap` key.
-        /// A slot in the slot map.
         pub const Slot = struct {
-            generation: Key.Generation,
+            generation: Generation,
             value: Value,
         };
 
-        /// The max number of values this slot map can hold simultaneously.
         capacity: usize,
 
-        /// The number of slots with saturated generations. For most use cases, the capacity should
-        /// be set high enough that this value remains 0.
         saturated: usize,
 
         slots: []Slot,
         next_index: usize,
-        free: []Key.Index,
+        free: []u32,
         free_count: usize,
 
-        /// Initializes a slot map with the given capacity.
         pub fn init(allocator: Allocator, capacity: usize) Allocator.Error!@This() {
-            assert(capacity <= std.math.maxInt(Key.Index));
-            comptime assert(std.math.maxInt(Key.Index) < std.math.maxInt(usize)); // For `next_index`
+            assert(capacity <= std.math.maxInt(u32));
+            comptime assert(std.math.maxInt(u32) < std.math.maxInt(usize)); // For `next_index`
 
             const slots = try allocator.alloc(Slot, capacity);
             errdefer allocator.free(slots);
 
-            const free = try allocator.alloc(Key.Index, capacity);
+            const free = try allocator.alloc(u32, capacity);
             errdefer allocator.free(free);
 
             return .{
@@ -138,7 +94,7 @@ pub fn SlotMap(Value: type) type {
         }
 
         pub fn put(self: *@This(), value: Value) error{Overflow}!Key {
-            const index: Key.Index = if (self.free_count > 0) b: {
+            const index: u32 = if (self.free_count > 0) b: {
                 self.free_count -= 1;
                 break :b self.free[self.free_count];
             } else b: {
@@ -160,7 +116,7 @@ pub fn SlotMap(Value: type) type {
         }
 
         pub fn reserve(self: *@This()) error{Overflow}!Key {
-            const index: Key.Index = if (self.free_count > 0) b: {
+            const index: u32 = if (self.free_count > 0) b: {
                 self.free_count -= 1;
                 break :b self.free[self.free_count];
             } else b: {
@@ -208,19 +164,17 @@ pub fn SlotMap(Value: type) type {
         }
 
         /// Removes the value associated with the given key. The key remains valid.
-        pub fn remove(self: *@This(), key: Key) ?Value {
-            if (!self.contains(key)) return null;
+        pub fn remove(self: *@This(), key: Key) void {
+            if (!self.contains(key)) return;
 
             self.slots[key.index].generation =
-                @fromBackingInt(@intCast(@backingInt(self.slots[key.index].generation) +% 1));
+                @fromBackingInt(@backingInt(self.slots[key.index].generation) +% 1);
             if (self.slots[key.index].generation == .invalid) {
                 self.saturated += 1;
             } else {
                 self.free[self.free_count] = key.index;
                 self.free_count += 1;
             }
-
-            return self.slots[key.index].value;
         }
 
         /// Similar to `remove`, but allows the key to be reused in the future.
@@ -242,7 +196,7 @@ pub fn SecondaryMap(Value: type) type {
         const Slot = union(enum) {
             vacant,
             occupied: struct {
-                generation: Key.Generation,
+                generation: Generation,
                 value: Value,
             },
         };
@@ -250,14 +204,14 @@ pub fn SecondaryMap(Value: type) type {
         slots: []Slot,
         len: usize,
 
-        pub fn init(gpa: Allocator, slot_capacity: usize) Allocator.Error!@This() {
-            const slots = try gpa.alloc(Slot, slot_capacity);
+        pub fn init(alloc: Allocator, slot_capacity: usize) Allocator.Error!@This() {
+            const slots = try alloc.alloc(Slot, slot_capacity);
             @memset(slots, .vacant);
             return .{ .slots = slots, .len = 0 };
         }
 
-        pub fn deinit(self: *@This(), gpa: Allocator) void {
-            gpa.free(self.slots);
+        pub fn deinit(self: *@This(), alloc: Allocator) void {
+            alloc.free(self.slots);
             self.* = undefined;
         }
 
@@ -361,8 +315,7 @@ test "slot map" {
     try std.testing.expect(a != b);
     try std.testing.expect(a != c);
     try std.testing.expect(b != c);
-    try std.testing.expect(a.toOptional() != Key.Optional.none);
-    try std.testing.expect(a.toOptional().unwrap().? == a);
+    try std.testing.expect(a != Key.none);
 
     try std.testing.expectError(error.Overflow, slots.put('d'));
 
@@ -534,13 +487,13 @@ test "format key" {
         .index = 10,
         .generation = @fromBackingInt(@intCast(11)),
     }});
-    try std.testing.expectFmt("0xA:B", "{f}", .{(Key{
+    try std.testing.expectFmt("0xA:B", "{f}", .{Key{
         .index = 10,
         .generation = @fromBackingInt(@intCast(11)),
-    }).toOptional()});
-    try std.testing.expectFmt(".invalid", "{f}", .{Key.Generation.invalid});
-    try std.testing.expectFmt("0xF", "{f}", .{@as(Key.Generation, @fromBackingInt(@intCast(0xf)))});
-    try std.testing.expectFmt(".none", "{f}", .{Key.Optional.none});
+    }});
+    try std.testing.expectFmt(".invalid", "{f}", .{Generation.invalid});
+    try std.testing.expectFmt("0xF", "{f}", .{@as(Generation, @fromBackingInt(@intCast(0xf)))});
+    try std.testing.expectFmt(".none", "{f}", .{Key.none});
 }
 
 test "eql" {
@@ -552,10 +505,10 @@ test "eql" {
     try std.testing.expect(!a.eql(b));
     try std.testing.expect(!a.eql(c));
 
-    try std.testing.expect(a.toOptional().eql(a.toOptional()));
-    try std.testing.expect(!a.toOptional().eql(b.toOptional()));
-    try std.testing.expect(!a.toOptional().eql(c.toOptional()));
-    try std.testing.expect(!a.toOptional().eql(.none));
-    try std.testing.expect(!Key.Optional.none.eql(a.toOptional()));
-    try std.testing.expect(Key.Optional.none.eql(.none));
+    try std.testing.expect(a.eql(a));
+    try std.testing.expect(!a.eql(b));
+    try std.testing.expect(!a.eql(c));
+    try std.testing.expect(!a.eql(.none));
+    try std.testing.expect(!Key.none.eql(a));
+    try std.testing.expect(Key.none.eql(.none));
 }
