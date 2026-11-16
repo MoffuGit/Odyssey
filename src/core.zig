@@ -29,7 +29,7 @@ const win = @import("window.zig");
 
 const log = std.log.scoped(.core);
 
-pub var core: struct {
+var core: struct {
     io: Io,
     gpa: Allocator,
     arena: ArenaAllocator,
@@ -261,6 +261,8 @@ pub fn render() !void {
             renderer.render(&ws.handle, frame, ws.resize);
         }
     }
+
+    core.frame += 1;
 }
 
 pub const WindowState = struct {
