@@ -5,7 +5,7 @@ const Bench = @import("bench.zig");
 const Buffer = @import("buffer.zig");
 const chunk_pool = @import("chunk_pool.zig");
 const chunked_path = @import("chunked_path.zig");
-const Core = @import("core.zig");
+const core = @import("core.zig");
 const datastruct = @import("datastruct.zig");
 const font = @import("font.zig");
 const global = @import("global.zig");
@@ -37,7 +37,6 @@ pub fn main(init: std.process.Init) !void {
     try win.init("Odyssey", 0);
     defer win.deinit();
 
-    var core: Core = undefined;
     try core.init(gpa, io);
     defer core.deinit();
 
@@ -50,7 +49,7 @@ pub fn main(init: std.process.Init) !void {
         .flags = win.WindowCenter | win.WindowFocus,
     });
 
-    try core.display.run();
+    try core.run();
 }
 
 test {
@@ -61,7 +60,6 @@ test {
     _ = Bench;
     _ = patch;
     _ = Buffer;
-    _ = Core;
     _ = chunk_pool;
     _ = chunked_path;
     _ = datastruct;

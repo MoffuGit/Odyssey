@@ -87,6 +87,15 @@ pub const Monitor = monitor: {
     };
 };
 
+pub fn popEvent() ?Event {
+    var ptr: rgfw.RGFW_event = undefined;
+    if (rgfw.RGFW_checkQueuedEvent(&ptr) == rgfw.RGFW_TRUE) {
+        return Event.convert(ptr);
+    } else {
+        return null;
+    }
+}
+
 pub const Window = window: {
     if (!builtin.is_test) break :window struct {
         ptr: ?*rgfw.struct_RGFW_window,
@@ -119,15 +128,6 @@ pub const Window = window: {
 
         pub fn userdata(self: *const @This()) ?*anyopaque {
             return rgfw.RGFW_window_getUserPtr(self.ptr);
-        }
-
-        pub fn popEvent(self: *const @This()) ?Event {
-            var ptr: rgfw.RGFW_event = undefined;
-            if (rgfw.RGFW_window_checkQueuedEvent(self.ptr, &ptr) == rgfw.RGFW_TRUE) {
-                return Event.convert(ptr);
-            } else {
-                return null;
-            }
         }
 
         pub fn shouldClose(self: *const @This()) bool {

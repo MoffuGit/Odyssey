@@ -16,7 +16,7 @@ display_link: *macos.video.DisplayLink,
 waker: Waker,
 loop: Loop,
 
-pub fn init(self: *Display, comptime function: *const fn (*Display) bool, io: Io) !void {
+pub fn init(self: *Display, comptime function: *const fn () bool, io: Io) !void {
     self.* = .{
         .display_link = undefined,
         .display_c = .noop,
@@ -28,11 +28,10 @@ pub fn init(self: *Display, comptime function: *const fn (*Display) bool, io: Io
     errdefer self.loop.deinit();
 
     const Callback = struct {
-        pub fn callback(completion: *Completion, _: *Loop, res: anyerror!void) bool {
+        pub fn callback(_: *Completion, _: *Loop, res: anyerror!void) bool {
             res catch unreachable;
-            const display: *Display = @fieldParentPtr("display_c", completion);
 
-            return @call(.always_inline, function, .{display});
+            return @call(.always_inline, function, .{});
         }
     };
 
