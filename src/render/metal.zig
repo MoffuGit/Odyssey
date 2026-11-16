@@ -9,8 +9,8 @@ const macos = @import("macos");
 const objc = @import("objc");
 
 const datastruct = @import("../datastruct.zig");
-const render = @import("../render.zig");
-const Handle = render.Handle;
+const renderer = @import("../renderer.zig");
+const Handle = renderer.Handle;
 const win = @import("../window.zig");
 const Window = win.Window;
 const c = @import("metal/c.zig");
@@ -26,7 +26,7 @@ const pipeline_descs: []const struct { [:0]const u8, PipelineDescription } =
                 .fragment_fn = "rectFragmentShader",
                 .blending_enabled = true,
                 .step_fn = .per_instance,
-                .vertex_attributes = render.Rect,
+                .vertex_attributes = renderer.Rect,
             },
         },
     };

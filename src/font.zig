@@ -18,21 +18,20 @@ const embedded = @import("embedded.zig");
 
 const log = std.log.scoped(.font_cache);
 
-const DEFAULT_DPI = if (builtin.os.tag == .macos) 72 else 96;
-pub const Cache = @This();
+pub var cache: struct {
+    arena: ArenaAllocator,
+    gpa: Allocator,
+    data: HashTable(u64, Data, Data.Context),
+    fonts: HashTable(u64, Font, Font.Context),
+    collections: HashTable(u64, Collection, Collection.Context),
+    atlas: Atlas,
+    atlas_gen: u64,
+    buffer: std.ArrayList(u8),
+    piece_buffer: std.ArrayList(Piece),
+} = undefined;
 
-arena: ArenaAllocator,
-gpa: Allocator,
-data: HashTable(u64, Data, Data.Context),
-fonts: HashTable(u64, Font, Font.Context),
-collections: HashTable(u64, Collection, Collection.Context),
-atlas: Atlas,
-atlas_gen: u64,
-buffer: std.ArrayList(u8),
-piece_buffer: std.ArrayList(Piece),
-
-pub fn init(self: *Cache, gpa: Allocator) !void {
-    self.* = .{
+pub fn init(gpa: Allocator) !void {
+    cache = .{
         .atlas_gen = 0,
         .piece_buffer = .empty,
         .gpa = gpa,
@@ -44,110 +43,110 @@ pub fn init(self: *Cache, gpa: Allocator) !void {
         .buffer = .empty,
     };
 
-    const arena = self.arena.allocator();
-    errdefer self.arena.deinit();
+    const arena = cache.arena.allocator();
+    errdefer cache.arena.deinit();
 
-    try self.atlas.init(1024, 1024, gpa);
-    errdefer self.atlas.deinit();
+    try cache.atlas.init(1024, 1024, gpa);
+    errdefer cache.atlas.deinit();
 
-    try self.data.init(1028, .{}, arena);
-    try self.fonts.init(1028, .{}, arena);
-    try self.collections.init(1028, .{}, arena);
+    try cache.data.init(1028, .{}, arena);
+    try cache.fonts.init(1028, .{}, arena);
+    try cache.collections.init(1028, .{}, arena);
 }
 
-pub fn deinit(self: *Cache) void {
-    var iter = self.collections.iterator();
+pub fn deinit() void {
+    var iter = cache.collections.iterator();
     while (iter.next()) |collection| collection.deinit();
-    self.atlas.deinit();
-    self.arena.deinit();
-    self.buffer.deinit(self.gpa);
-    self.piece_buffer.deinit(self.gpa);
+    cache.atlas.deinit();
+    cache.arena.deinit();
+    cache.buffer.deinit(cache.gpa);
+    cache.piece_buffer.deinit(cache.gpa);
 }
 
-pub fn fromPath(self: *Cache, abs_path: []const u8, index: u32, io: Io) !Tag {
-    const arena = self.arena.allocator();
+pub fn fromPath(abs_path: []const u8, index: u32, io: Io) !Tag {
+    const arena = cache.arena.allocator();
 
     var hash = std.hash.Wyhash.hash(0, abs_path);
     hash |= 1 << 63;
 
     const tag: Tag = .new(hash, index);
 
-    if (self.fonts.get(tag.font_hash) == null) {
-        const data = self.data.get(tag.data_hash) orelse data: {
+    if (cache.fonts.get(tag.font_hash) == null) {
+        const data = cache.data.get(tag.data_hash) orelse data: {
             const new = try arena.create(Data);
 
             try new.fromPath(tag.data_hash, abs_path, arena, io);
 
-            self.data.insert(new.key, new);
+            cache.data.insert(new.key, new);
 
             break :data new;
         };
 
-        try self.addFont(data, index, tag);
+        try addFont(data, index, tag);
     }
 
     return tag;
 }
 
-pub fn fromBytes(self: *Cache, bytes: []const u8, index: u32) !Tag {
-    const arena = self.arena.allocator();
+pub fn fromBytes(bytes: []const u8, index: u32) !Tag {
+    const arena = cache.arena.allocator();
 
     var hash = std.hash.Wyhash.hash(0, bytes);
     hash &= ~@as(u64, 1 << 63);
 
     const tag: Tag = .new(hash, index);
 
-    if (self.fonts.get(tag.font_hash) == null) {
-        const data = self.data.get(tag.data_hash) orelse data: {
+    if (cache.fonts.get(tag.font_hash) == null) {
+        const data = cache.data.get(tag.data_hash) orelse data: {
             const new = try arena.create(Data);
 
             new.fromBytes(bytes, tag.data_hash);
 
-            self.data.insert(new.key, new);
+            cache.data.insert(new.key, new);
 
             break :data new;
         };
 
-        try self.addFont(data, index, tag);
+        try addFont(data, index, tag);
     }
 
     return tag;
 }
 
-pub fn addFont(self: *Cache, data: *Data, index: u32, tag: Tag) !void {
-    const arena = self.arena.allocator();
+pub fn addFont(data: *Data, index: u32, tag: Tag) !void {
+    const arena = cache.arena.allocator();
 
     const font = try arena.create(Font);
 
     try font.init(data, index, tag, arena);
-    self.fonts.insert(tag.font_hash, font);
+    cache.fonts.insert(tag.font_hash, font);
 }
 
-pub fn addCollection(self: *Cache, tags: []const Tag) !u64 {
+pub fn addCollection(tags: []const Tag) !u64 {
     var hasher = std.hash.Wyhash.init(0);
     for (tags) |tag| autoHash(&hasher, tag);
     const key = hasher.final();
-    if (self.collections.get(key) != null) return key;
+    if (cache.collections.get(key) != null) return key;
 
-    const arena = self.arena.allocator();
+    const arena = cache.arena.allocator();
 
     const collection = try arena.create(Collection);
     try collection.init(key, arena);
 
     for (tags) |tag| {
-        const font = self.fonts.get(tag.font_hash) orelse continue;
+        const font = cache.fonts.get(tag.font_hash) orelse continue;
         try collection.add(font, arena);
     }
 
-    self.collections.insert(key, collection);
+    cache.collections.insert(key, collection);
     return key;
 }
 
-pub fn metrics(self: *Cache, key: u64, size: f32) !Metrics {
-    const collection = self.collections.get(key) orelse return error.MissingCollection;
+pub fn metrics(key: u64, size: f32) !Metrics {
+    const collection = cache.collections.get(key) orelse return error.MissingCollection;
     var iter = collection.tags.iterator();
     while (iter.next()) |item| {
-        const font = self.fonts.get(item.tag.font_hash) orelse continue;
+        const font = cache.fonts.get(item.tag.font_hash) orelse continue;
         if (font.status == .invalid) continue;
         const scale = font.ttf.scaleForPixelHeight(size);
         return .{
@@ -160,13 +159,8 @@ pub fn metrics(self: *Cache, key: u64, size: f32) !Metrics {
     return error.InvalidCollection;
 }
 
-pub fn run(
-    self: *Cache,
-    key: u64,
-    size: f32,
-    str: []const u8,
-) !Run {
-    const collection = self.collections.get(key) orelse return error.MissingCollection;
+pub fn run(key: u64, size: f32, str: []const u8) !Run {
+    const collection = cache.collections.get(key) orelse return error.MissingCollection;
 
     if (collection.runs.get(.{ .str = str, .size = size })) |cached| return cached.*;
 
@@ -175,7 +169,7 @@ pub fn run(
     context.ShapeUtf8(str.ptr, @intCast(str.len), kb.KBTS_USER_ID_GENERATION_MODE_CODEPOINT_INDEX);
     context.ShapeEnd();
 
-    const arena = self.arena.allocator();
+    const arena = cache.arena.allocator();
 
     var dimensions: [2]f32 = @splat(0.0);
     var kb_run: kb.kbts_run = undefined;
@@ -185,7 +179,7 @@ pub fn run(
 
         var kb_glyph: [*c]kb.kbts_glyph = undefined;
         while (kb_run.Glyphs.GlyphIteratorNext(&kb_glyph) != 0) {
-            const glyph = try self.getGlyph(font.tag, kb_glyph.*.Id, size);
+            const glyph = try getGlyph(font.tag, kb_glyph.*.Id, size);
             const advance_x: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.AdvanceX)));
             const advance_y: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.AdvanceY)));
             const offset_x: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.OffsetX)));
@@ -205,7 +199,7 @@ pub fn run(
                 .advance_y = advance_y * scale,
             };
 
-            try self.piece_buffer.append(self.gpa, piece);
+            try cache.piece_buffer.append(cache.gpa, piece);
 
             dimensions[0] += piece.advance_x;
             dimensions[1] = @max(dimensions[1], piece.advance_y);
@@ -216,42 +210,42 @@ pub fn run(
     new.* = .{
         .dimensions = dimensions,
         .str = try arena.dupe(u8, str),
-        .pieces = try arena.dupe(Piece, self.piece_buffer.items),
+        .pieces = try arena.dupe(Piece, cache.piece_buffer.items),
         .size = size,
     };
     collection.runs.insert(.{ .str = new.str, .size = size }, new);
-    self.piece_buffer.clearRetainingCapacity();
+    cache.piece_buffer.clearRetainingCapacity();
 
     return new.*;
 }
 
-pub fn getGlyph(self: *Cache, tag: Tag, index: u16, size: f32) !Glyph {
-    const font = self.fonts.get(tag.font_hash) orelse return error.MissingFont;
+pub fn getGlyph(tag: Tag, index: u16, size: f32) !Glyph {
+    const font = cache.fonts.get(tag.font_hash) orelse return error.MissingFont;
 
     if (font.status == .invalid) return error.InvalidFont;
 
     if (font.glyphs.get(.{ .index = index, .size = size })) |glyph| return glyph.*;
 
-    const arena = self.arena.allocator();
+    const arena = cache.arena.allocator();
 
     const scale = font.ttf.scaleForPixelHeight(size);
-    defer self.buffer.clearRetainingCapacity();
-    const bitmap = try font.ttf.glyphBitmap(self.gpa, &self.buffer, @fromBackingInt(index), scale, scale);
+    defer cache.buffer.clearRetainingCapacity();
+    const bitmap = try font.ttf.glyphBitmap(cache.gpa, &cache.buffer, @fromBackingInt(index), scale, scale);
 
     var region: Atlas.Region = .{ .x = 0, .y = 0, .width = 0, .height = 0 };
     var rotate = false;
 
     if (bitmap.width != 0 and bitmap.height != 0) {
-        region = try self.atlas.reserve(bitmap.width, bitmap.height);
+        region = try cache.atlas.reserve(bitmap.width, bitmap.height);
         rotate = bitmap.width != region.width;
 
         const len = @as(usize, bitmap.width) * bitmap.height;
-        var pixels = self.buffer.items[0..len];
+        var pixels = cache.buffer.items[0..len];
 
         if (rotate) {
-            try self.buffer.ensureUnusedCapacity(self.gpa, len);
-            const src = self.buffer.items[0..len];
-            pixels = self.buffer.addManyAsSliceAssumeCapacity(len);
+            try cache.buffer.ensureUnusedCapacity(cache.gpa, len);
+            const src = cache.buffer.items[0..len];
+            pixels = cache.buffer.addManyAsSliceAssumeCapacity(len);
 
             for (0..bitmap.height) |y| {
                 for (0..bitmap.width) |x| {
@@ -260,8 +254,8 @@ pub fn getGlyph(self: *Cache, tag: Tag, index: u16, size: f32) !Glyph {
             }
         }
 
-        self.atlas.set(region, pixels);
-        self.atlas_gen += 1;
+        cache.atlas.set(region, pixels);
+        cache.atlas_gen += 1;
     }
 
     const glyph = try arena.create(Glyph);
@@ -581,28 +575,27 @@ test "basic" {
     const gpa = testing.allocator;
     const io = testing.io;
 
-    var cache: Cache = undefined;
-    try cache.init(gpa);
-    defer cache.deinit();
+    try init(gpa);
+    defer deinit();
 
     const abs_path = try Io.Dir.cwd().realPathFileAlloc(io, "src/embedded/Inter.ttc", gpa);
     defer gpa.free(abs_path);
 
-    const tag1 = try cache.fromPath(abs_path, 0, io);
-    const tag2 = try cache.fromBytes(embedded.inter, 0);
+    const tag1 = try fromPath(abs_path, 0, io);
+    const tag2 = try fromBytes(embedded.inter, 0);
 
-    const collection = try cache.addCollection(&.{ tag1, tag2 });
+    const collection = try addCollection(&.{ tag1, tag2 });
 
-    const res = try cache.run(collection, 12, "Hello");
+    const res = try run(collection, 12, "Hello");
 
     try testing.expectEqual(5, res.pieces.len);
     try testing.expectEqual(res.pieces[2], res.pieces[3]);
     try testing.expect(!std.meta.eql(res.pieces[0], res.pieces[1]));
 
-    const cached = try cache.run(collection, 12, "Hello");
+    const cached = try run(collection, 12, "Hello");
     try testing.expectEqual(res.pieces.ptr, cached.pieces.ptr);
 
-    const bigger = try cache.run(collection, 24, "Hello");
+    const bigger = try run(collection, 24, "Hello");
 
     try testing.expect(bigger.pieces[0].height > res.pieces[0].height);
 
@@ -611,7 +604,7 @@ test "basic" {
     var node = cache.atlas.regions.first;
     while (node) |n| : (node = n.next) try before.append(gpa, n.region);
 
-    const space = try cache.run(collection, 24, " ");
+    const space = try run(collection, 24, " ");
     try testing.expectEqual(0, space.pieces[0].width);
     try testing.expectEqual(0, space.pieces[0].height);
 

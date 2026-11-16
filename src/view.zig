@@ -14,84 +14,137 @@ const datastruct = @import("datastruct.zig");
 const HashTable = datastruct.HashTable;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 const TaggedLinkedList = datastruct.TaggedLinkedList;
-const FontCache = @import("font.zig");
-const Run = FontCache.Run;
+const font = @import("font.zig");
+const Run = font.Run;
 const rng2 = @import("math.zig").rng2;
 const win = @import("window.zig");
 const Window = win.Window;
 
 const log = std.log.scoped(.view);
 
-pub const View = @This();
+threadlocal var local: *View = undefined;
 
-arena: heap.ArenaAllocator,
+pub const View = struct {
+    arena: heap.ArenaAllocator,
+    chunks: chunk_pool.ChunkAllocator,
+    mouse: [2]f32,
+    block_count: u64,
+    root: ?*Block,
 
-root: ?*Block,
+    frame: u64,
+    frame_arenas: [2]heap.ArenaAllocator,
+    frame_chunks: [2]chunk_pool.ChunkAllocator,
 
-block_count: u64,
+    stacks: Stacks,
+    pop_flags: u64,
+    hot: ?u64,
+    active: ?u64,
+    events: DoublyLinkedList(Event),
+    cache: Cache,
 
-mouse: [2]f32,
+    pub fn init(self: *View, gpa: Allocator) !void {
+        self.* = .{
+            .active = null,
+            .hot = null,
+            .events = .empty,
+            .mouse = @splat(0.0),
+            .cache = undefined,
+            .arena = .init(gpa),
+            .root = null,
+            .block_count = 0,
+            .frame = 0,
+            .frame_arenas = .{ .init(gpa), .init(gpa) },
+            .frame_chunks = undefined,
+            .stacks = .empty,
+            .pop_flags = 0,
+            .chunks = undefined,
+        };
 
-frame: u64,
-frame_arenas: [2]heap.ArenaAllocator,
-frame_chunks: [2]chunk_pool.ChunkAllocator,
+        const arena = self.arena.allocator();
+        errdefer self.arena.deinit();
 
-stacks: Stacks,
-pop_flags: u64,
+        for (&self.frame_chunks) |*chunk| {
+            try chunk.init(arena, &.{
+                .{ .capacity = 2048, .chunk_size = @sizeOf(Attribute) + @sizeOf(?*Attribute) },
+                .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
+                .{ .capacity = 128, .chunk_size = @sizeOf(Event) },
+            });
+        }
 
-hot: ?u64,
-active: ?u64,
-
-events: DoublyLinkedList(Event),
-
-cache: Cache,
-
-chunks: chunk_pool.ChunkAllocator,
-
-font_cache: *FontCache,
-
-pub fn init(self: *View, font_cache: *FontCache, gpa: Allocator) !void {
-    self.* = .{
-        .active = null,
-        .hot = null,
-        .events = .empty,
-        .mouse = @splat(0.0),
-        .cache = undefined,
-        .arena = .init(gpa),
-        .root = null,
-        .block_count = 0,
-        .frame = 0,
-        .frame_arenas = .{ .init(gpa), .init(gpa) },
-        .frame_chunks = undefined,
-        .stacks = .empty,
-        .pop_flags = 0,
-        .chunks = undefined,
-        .font_cache = font_cache,
-    };
-
-    const arena = self.arena.allocator();
-    errdefer self.arena.deinit();
-
-    for (&self.frame_chunks) |*chunk| {
-        try chunk.init(arena, &.{
-            .{ .capacity = 2048, .chunk_size = @sizeOf(Attribute) + @sizeOf(?*Attribute) },
-            .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
-            .{ .capacity = 128, .chunk_size = @sizeOf(Event) },
-        });
+        try self.chunks.init(arena, &.{.{ .capacity = 2048, .chunk_size = @sizeOf(Block) }});
+        try self.cache.init(2048, .{}, arena);
     }
 
-    try self.chunks.init(arena, &.{.{ .capacity = 2048, .chunk_size = @sizeOf(Block) }});
-    try self.cache.init(2048, .{}, arena);
+    pub fn deinit(self: *View) void {
+        for (self.frame_arenas) |arena| arena.deinit();
+        self.arena.deinit();
+    }
+};
+
+pub fn setView(view: *View) void {
+    local = view;
 }
 
-pub fn deinit(self: *View) void {
-    for (self.frame_arenas) |arena| arena.deinit();
-    self.arena.deinit();
+pub fn begin(window: Window, resize: bool, fnt: u64) void {
+    const window_size = window.size() catch .{ 0.0, 0.0 };
+
+    local.root = null;
+    local.stacks = .empty;
+    local.pop_flags = 0;
+    local.block_count = 0;
+
+    if (local.active == null) local.hot = null;
+
+    if (resize) {
+        local.mouse = .{ -1.0, -1.0 };
+    } else {
+        local.mouse = window.mouse() catch .{ -1.0, -1.0 };
+    }
+
+    width(.{ .fixed = window_size[0] });
+    height(.{ .fixed = window_size[1] });
+
+    local.root = blk(.{});
+
+    pushAttr(.{ .width = .fit });
+    pushAttr(.{ .height = .fit });
+    pushAttr(.{ .font_family = fnt });
+    pushAttr(.{ .font_size = 32.0 });
 }
 
-pub fn getSeed(self: *View) u64 {
+pub fn finish() void {
+    const chunks = local.chunks.allocator();
+    const root = local.root orelse unreachable;
+
+    inline for (0..2) |axis| {
+        root.layout(axis);
+    }
+
+    var iter = local.cache.iterator();
+
+    while (iter.next()) |cached| {
+        const block: *Block = @fieldParentPtr("cached", cached);
+
+        if (block.touched_frame != local.frame) {
+            iter.remove();
+            chunks.destroy(block);
+        }
+    }
+
+    local.frame += 1;
+    local.events = .empty;
+
+    const frame_index = local.frame % local.frame_arenas.len;
+
+    _ = local.frame_arenas[frame_index].reset(.retain_capacity);
+    _ = local.frame_chunks[frame_index].reset();
+
+    local = undefined;
+}
+
+pub fn getSeed() u64 {
     var seed: u64 = 0;
-    var iter = self.stacks.get(.parent).iterator();
+    var iter = local.stacks.get(.parent).iterator();
     while (iter.next()) |node| {
         if (node.value.key) |key| {
             seed = key;
@@ -115,8 +168,8 @@ pub fn keyFromString(seed: u64, str: []const u8) ?u64 {
     return key;
 }
 
-pub fn textPosition(self: *View, block: *Block) struct { f32, f32 } {
-    const metrics = self.font_cache.metrics(block.font_family, block.font_size) catch return .{ 0.0, 0.0 };
+pub fn textPosition(block: *Block) struct { f32, f32 } {
+    const metrics = font.metrics(block.font_family, block.font_size) catch return .{ 0.0, 0.0 };
     const dim = if (block.run) |run| run.dimensions else return .{ 0.0, 0.0 };
 
     var position: [2]f32 = @splat(0.0);
@@ -141,8 +194,8 @@ pub fn displayString(str: []const u8) []const u8 {
     return str[0..idx];
 }
 
-pub fn setDisplayString(self: *View, block: *Block, str: []const u8) void {
-    const arena = self.frameArena();
+pub fn setDisplayString(block: *Block, str: []const u8) void {
+    const arena = frameArena();
 
     const dupe = arena.dupe(u8, str) catch return;
     const display = displayString(str);
@@ -150,7 +203,7 @@ pub fn setDisplayString(self: *View, block: *Block, str: []const u8) void {
     block.string = dupe;
     if (display.len == 0) return;
 
-    block.run = self.font_cache.run(
+    block.run = font.run(
         block.font_family,
         block.font_size,
         display,
@@ -160,82 +213,27 @@ pub fn setDisplayString(self: *View, block: *Block, str: []const u8) void {
     };
 }
 
-pub fn begin(self: *View, window: Window, resize: bool, fnt: u64) !void {
-    const window_size = try window.size();
-
-    self.root = null;
-    self.stacks = .empty;
-    self.pop_flags = 0;
-    self.block_count = 0;
-
-    if (self.active == null) self.hot = null;
-
-    if (resize) {
-        self.mouse = .{ -1.0, -1.0 };
-    } else {
-        self.mouse = try window.mouse();
-    }
-
-    self.width(.{ .fixed = window_size[0] });
-    self.height(.{ .fixed = window_size[1] });
-
-    self.root = self.blk(.{});
-
-    self.pushAttr(.{ .width = .fit });
-    self.pushAttr(.{ .height = .fit });
-    self.pushAttr(.{ .font_family = fnt });
-    self.pushAttr(.{ .font_size = 32.0 });
-}
-
-pub fn finish(self: *View) void {
-    const chunks = self.chunks.allocator();
-    const root = self.root orelse unreachable;
-
-    inline for (0..2) |axis| {
-        root.layout(axis);
-    }
-
-    var iter = self.cache.iterator();
-
-    while (iter.next()) |cached| {
-        const block: *Block = @fieldParentPtr("cached", cached);
-
-        if (block.touched_frame != self.frame) {
-            iter.remove();
-            chunks.destroy(block);
-        }
-    }
-
-    self.frame += 1;
-    self.events = .empty;
-
-    const frame_index = self.frame % self.frame_arenas.len;
-
-    _ = self.frame_arenas[frame_index].reset(.retain_capacity);
-    _ = self.frame_chunks[frame_index].reset();
-}
-
-pub fn pushEvent(self: *View, @"type": win.EventType) void {
-    const chunks = self.frameChunks();
+pub fn pushEvent(@"type": win.EventType) void {
+    const chunks = local.frameChunks();
 
     const event = chunks.create(Event) catch @panic("Chunk Overflow");
 
     event.* = .{ .type = @"type" };
 
-    self.events.append(event);
+    local.events.append(event);
 }
 
-pub fn signal(self: *View, block: *Block) Signal {
+pub fn signal(block: *Block) Signal {
     const flags = block.flags;
 
     var _signal: Signal = .none;
 
-    const mouse = self.mouse;
+    const mouse = local.mouse;
     const rect = block.rect;
 
     const in_bounds = rng2.contains(rect, mouse);
 
-    var node = self.events.first;
+    var node = local.events.first;
 
     while (node) |event| {
         node = event.next;
@@ -249,33 +247,33 @@ pub fn signal(self: *View, block: *Block) Signal {
                     in_bounds)
                 {
                     consumed = true;
-                    self.hot = block.key;
-                    self.active = block.key;
+                    local.hot = block.key;
+                    local.active = block.key;
                     _signal.mouse_pressed = true;
                 }
 
                 if (flags.mouse and
                     data.type == .mouse_button_released and
-                    self.active == block.key)
+                    local.active == block.key)
                 {
                     consumed = true;
-                    self.active = null;
+                    local.active = null;
                     _signal.mouse_released = true;
-                    if (in_bounds) _signal.clicked = true else self.hot = null;
+                    if (in_bounds) _signal.clicked = true else local.hot = null;
                 }
             },
             else => unreachable,
         }
 
-        if (consumed) self.events.remove(event);
+        if (consumed) local.events.remove(event);
     }
 
     if (flags.mouse and in_bounds and
-        (self.hot == null or self.hot == block.key) and
-        (self.active == null or self.active == block.key))
+        (local.hot == null or local.hot == block.key) and
+        (local.active == null or local.active == block.key))
     {
         _signal.hovered = true;
-        self.hot = block.key;
+        local.hot = block.key;
     }
 
     if (in_bounds) {
@@ -285,8 +283,8 @@ pub fn signal(self: *View, block: *Block) Signal {
     return _signal;
 }
 
-pub fn fmt(self: *View, comptime format: []const u8, args: anytype) ![]u8 {
-    const frame_arena = self.frameArena();
+pub fn fmt(comptime format: []const u8, args: anytype) ![]u8 {
+    const frame_arena = local.frameArena();
 
     const required = std.fmt.count(format, args);
     const buffer = try frame_arena.alloc(u8, required);
@@ -294,12 +292,12 @@ pub fn fmt(self: *View, comptime format: []const u8, args: anytype) ![]u8 {
     return std.fmt.bufPrint(buffer, format, args) catch unreachable;
 }
 
-pub fn blkStr(self: *View, str: []const u8, flags: Block.Flags) *Block {
-    const key = keyFromString(self.getSeed(), str);
+pub fn blkStr(str: []const u8, flags: Block.Flags) *Block {
+    const key = keyFromString(getSeed(), str);
 
-    const block = self.blk(.{ .flags = flags, .key = key });
+    const block = blk(.{ .flags = flags, .key = key });
 
-    if (block.flags.text) self.setDisplayString(block, str);
+    if (block.flags.text) setDisplayString(block, str);
 
     return block;
 }
@@ -309,17 +307,17 @@ const Options = struct {
     key: ?u64 = null,
 };
 
-pub fn blk(self: *View, options: Options) *Block {
-    const frame_chunks = self.frameChunks();
-    const chunks = self.chunks.allocator();
+pub fn blk(options: Options) *Block {
+    const frame_chunks = frameChunks();
+    const chunks = local.chunks.allocator();
 
     const cached = bkl: {
         const key = options.key orelse break :bkl null;
 
-        if (self.cache.get(key)) |c| {
+        if (local.cache.get(key)) |c| {
             const block: *Block = @fieldParentPtr("cached", c);
 
-            if (block.touched_frame == self.frame) {
+            if (block.touched_frame == local.frame) {
                 log.warn("Repeated block key", .{});
                 break :bkl null;
             }
@@ -331,7 +329,7 @@ pub fn blk(self: *View, options: Options) *Block {
             block.* = .empty;
             block.key = key;
 
-            self.cache.insert(key, &block.cached);
+            local.cache.insert(key, &block.cached);
             break :bkl block;
         }
     };
@@ -343,189 +341,189 @@ pub fn blk(self: *View, options: Options) *Block {
         break :bkl block;
     };
 
-    block.build(self, options.flags);
+    block.build(local, options.flags);
 
-    self.blkComplete(block);
+    blkComplete(block);
 
     return block;
 }
 
-pub fn blkEnd(self: *View) void {
-    const block = self.stacks.get(.parent).head.?.value;
+pub fn blkEnd() void {
+    const block = local.stacks.get(.parent).head.?.value;
     if (block.flags.padding) {
-        const value = self.stacks.get(.padding).head.?.value;
-        self.spacer(value.@"0", value.@"1");
+        const value = local.stacks.get(.padding).head.?.value;
+        spacer(value.@"0", value.@"1");
 
-        self.popAttr(.padding);
+        popAttr(.padding);
     }
 
-    self.popAttr(.parent);
+    popAttr(.parent);
 }
 
-fn blkComplete(self: *View, block: *Block) void {
+fn blkComplete(block: *Block) void {
     inline for (@typeInfo(Stacks.Field).@"enum".field_values) |value| {
         const flag = @as(u64, 1) << value;
-        if (self.pop_flags & flag != 0) {
-            self.pop_flags &= ~flag;
-            if (self.stacks.pop(@fromBackingInt(value)) == null) unreachable;
+        if (local.pop_flags & flag != 0) {
+            local.pop_flags &= ~flag;
+            if (local.stacks.pop(@fromBackingInt(value)) == null) unreachable;
         }
     }
 
-    self.pushAttr(.{ .parent = block });
+    pushAttr(.{ .parent = block });
 
     if (block.flags.padding) {
-        const value = self.stacks.get(.padding).head.?.value;
-        self.spacer(value.@"0", value.@"1");
+        const value = local.stacks.get(.padding).head.?.value;
+        spacer(value.@"0", value.@"1");
     }
 
-    self.block_count += 1;
+    local.block_count += 1;
 }
 
-pub fn pushAttr(self: *View, attr: Attribute) void {
-    const chunks = self.frameChunks();
+pub fn pushAttr(attr: Attribute) void {
+    const chunks = frameChunks();
 
     switch (attr) {
         inline else => |value, flag| {
-            assert(self.pop_flags & stackFlag(flag) == 0);
+            assert(local.pop_flags & stackFlag(flag) == 0);
 
             const node = chunks.create(Node(flag)) catch @panic("Frame chunks overflow");
             node.* = .{ .value = value };
-            self.stacks.prepend(flag, node);
+            local.stacks.prepend(flag, node);
         },
     }
 }
 
-pub fn popAttr(self: *View, comptime field: StackField) void {
-    assert(self.pop_flags & stackFlag(field) == 0);
+pub fn popAttr(comptime field: StackField) void {
+    assert(local.pop_flags & stackFlag(field) == 0);
 
-    const chunks = self.frameChunks();
-    const node = self.stacks.pop(field) orelse unreachable;
+    const chunks = frameChunks();
+    const node = local.stacks.pop(field) orelse unreachable;
     chunks.destroy(node);
 }
 
-pub fn popAttrs(self: *View, comptime fields: []const StackField) void {
-    inline for (fields) |field| self.popAttr(field);
+pub fn popAttrs(comptime fields: []const StackField) void {
+    inline for (fields) |field| local.popAttr(field);
 }
 
-pub fn nextAttr(self: *View, attr: Attribute) void {
+pub fn nextAttr(attr: Attribute) void {
     assert(attr != .padding);
 
-    self.pushAttr(attr);
-    self.flagStack(meta.activeTag(attr));
+    pushAttr(attr);
+    flagStack(meta.activeTag(attr));
 }
 
-fn frameArena(self: *View) Allocator {
-    return self.frame_arenas[self.frame % self.frame_arenas.len].allocator();
+fn frameArena() Allocator {
+    return local.frame_arenas[local.frame % local.frame_arenas.len].allocator();
 }
 
-fn frameChunks(self: *View) Allocator {
-    return self.frame_chunks[self.frame % self.frame_arenas.len].allocator();
+fn frameChunks() Allocator {
+    return local.frame_chunks[local.frame % local.frame_arenas.len].allocator();
 }
 
-fn flagStack(self: *View, field: StackField) void {
-    self.pop_flags |= stackFlag(field);
+fn flagStack(field: StackField) void {
+    local.pop_flags |= stackFlag(field);
 }
 
-pub fn padding(self: *View, sizing: Sizing, factor: f32) void {
-    self.pushAttr(.{ .padding = .{ sizing, factor } });
-    self.nextFlag().padding = true;
+pub fn padding(sizing: Sizing, factor: f32) void {
+    pushAttr(.{ .padding = .{ sizing, factor } });
+    nextFlag().padding = true;
 }
 
-pub fn shrink(self: *View, factor: f32) void {
-    const parent = self.stacks.get(.parent).head;
+pub fn shrink(factor: f32) void {
+    const parent = local.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
     switch (axis) {
-        .x => self.nextAttr(.{ .width_shrink = factor }),
-        .y => self.nextAttr(.{ .height_shrink = factor }),
+        .x => nextAttr(.{ .width_shrink = factor }),
+        .y => nextAttr(.{ .height_shrink = factor }),
     }
 }
 
-pub fn rounded(self: *View, radius: f32) void {
-    self.nextAttr(.{ .radius = @splat(radius) });
+pub fn rounded(radius: f32) void {
+    nextAttr(.{ .radius = @splat(radius) });
 }
 
-pub fn fontFamily(self: *View, value: u64) void {
-    self.nextAttr(.{ .font_family = value });
+pub fn fontFamily(value: u64) void {
+    nextAttr(.{ .font_family = value });
 }
 
-pub fn fontSize(self: *View, value: f32) void {
-    self.nextAttr(.{ .font_size = value });
+pub fn fontSize(value: f32) void {
+    nextAttr(.{ .font_size = value });
 }
 
-pub fn textColor(self: *View, value: [4]f32) void {
-    self.nextAttr(.{ .text_color = value });
+pub fn textColor(value: [4]f32) void {
+    nextAttr(.{ .text_color = value });
 }
 
-pub fn textAlign(self: *View, value: TextAlign) void {
-    self.nextAttr(.{ .text_align = value });
+pub fn textAlign(value: TextAlign) void {
+    nextAttr(.{ .text_align = value });
 }
 
-pub fn textPadding(self: *View, value: f32) void {
-    self.nextAttr(.{ .text_padding = value });
+pub fn textPadding(value: f32) void {
+    nextAttr(.{ .text_padding = value });
 }
 
-pub fn size(self: *View, sizing: Sizing) void {
-    self.width(sizing);
-    self.height(sizing);
+pub fn size(sizing: Sizing) void {
+    width(sizing);
+    height(sizing);
 }
 
-pub fn width(self: *View, sizing: Sizing) void {
-    self.nextAttr(.{ .width = sizing });
+pub fn width(sizing: Sizing) void {
+    nextAttr(.{ .width = sizing });
 }
 
-pub fn height(self: *View, sizing: Sizing) void {
-    self.nextAttr(.{ .height = sizing });
+pub fn height(sizing: Sizing) void {
+    nextAttr(.{ .height = sizing });
 }
 
-pub fn nextFlag(self: *View) *Block.Flags {
-    if (self.pop_flags & stackFlag(.flags) == 0) {
-        self.nextAttr(.{ .flags = .{} });
+pub fn nextFlag() *Block.Flags {
+    if (local.pop_flags & stackFlag(.flags) == 0) {
+        nextAttr(.{ .flags = .{} });
     }
 
-    const h = self.stacks.get(.flags).head orelse unreachable;
+    const h = local.stacks.get(.flags).head orelse unreachable;
     return &h.value;
 }
 
-pub fn background(self: *View, color: [4]f32) void {
-    self.nextAttr(.{ .background = color });
-    self.nextFlag().background = true;
+pub fn background(color: [4]f32) void {
+    nextAttr(.{ .background = color });
+    nextFlag().background = true;
 }
 
-pub fn border(self: *View, thickness: f32, color: [4]f32) void {
-    self.nextAttr(.{ .border = color });
-    self.nextAttr(.{ .thickness = thickness });
-    self.nextFlag().border = true;
+pub fn border(thickness: f32, color: [4]f32) void {
+    nextAttr(.{ .border = color });
+    nextAttr(.{ .thickness = thickness });
+    nextFlag().border = true;
 }
 
-pub fn col(self: *View) void {
-    self.nextAttr(.{ .axis = .y });
+pub fn col() void {
+    nextAttr(.{ .axis = .y });
 }
 
-pub fn row(self: *View) void {
-    self.nextAttr(.{ .axis = .x });
+pub fn row() void {
+    local.nextAttr(.{ .axis = .x });
 }
 
-pub fn spacer(self: *View, sizing: Sizing, factor: f32) void {
-    const parent = self.stacks.get(.parent).head;
+pub fn spacer(sizing: Sizing, factor: f32) void {
+    const parent = local.stacks.get(.parent).head;
     const axis: Axis = if (parent) |p| p.value.axis else .x;
 
     switch (axis) {
-        .x => self.width(sizing),
-        .y => self.height(sizing),
+        .x => width(sizing),
+        .y => height(sizing),
     }
 
-    self.shrink(factor);
+    shrink(factor);
 
-    _ = self.blk(.{});
-    self.blkEnd();
+    _ = blk(.{});
+    blkEnd();
 }
 
-pub fn button(self: *View, str: []const u8) Signal {
-    const block = self.blkStr(str, .{ .mouse = true, .text = true });
-    self.blkEnd();
+pub fn button(str: []const u8) Signal {
+    const block = blkStr(str, .{ .mouse = true, .text = true });
+    blkEnd();
 
-    return self.signal(block);
+    return signal(block);
 }
 
 const Event = struct {

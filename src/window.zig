@@ -39,7 +39,7 @@ pub fn deinit() void {
     }
 }
 
-pub fn pollEvents() void {
+pub fn poll() void {
     rgfw.RGFW_pollEvents();
 }
 
