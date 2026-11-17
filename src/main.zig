@@ -10,7 +10,7 @@ const core = @import("core.zig");
 const datastruct = @import("datastruct.zig");
 const font = @import("font.zig");
 const global = @import("global.zig");
-const Loop = @import("loop.zig");
+const async = @import("async.zig");
 const patch = @import("patch.zig");
 const renderer = @import("renderer.zig");
 const scheduler = @import("scheduler.zig");
@@ -69,5 +69,5 @@ test {
     _ = chunk_pool;
     _ = ChunkedPath;
     _ = datastruct;
-    _ = Loop;
+    _ = async;
 }

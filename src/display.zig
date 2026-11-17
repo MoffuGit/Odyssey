@@ -3,18 +3,16 @@ const Io = std.Io;
 
 const macos = @import("macos");
 
-const Loop = @import("loop.zig");
-const Completion = Loop.Completion;
-const Waker = Loop.Waker;
+const async = @import("async.zig");
 
 const log = std.log.scoped(.display);
 
 const Display = @This();
 
-display_c: Completion,
+display_c: async.Completion,
 display_link: *macos.video.DisplayLink,
-waker: Waker,
-loop: Loop,
+waker: async.Waker,
+loop: async.Loop,
 
 pub fn init(self: *Display, comptime function: *const fn () bool, io: Io) !void {
     self.* = .{
@@ -28,7 +26,7 @@ pub fn init(self: *Display, comptime function: *const fn () bool, io: Io) !void 
     errdefer self.loop.deinit();
 
     const Callback = struct {
-        pub fn callback(_: *Completion, _: *Loop, res: anyerror!void) bool {
+        pub fn callback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool {
             res catch unreachable;
 
             return @call(.always_inline, function, .{});
@@ -36,15 +34,15 @@ pub fn init(self: *Display, comptime function: *const fn () bool, io: Io) !void 
     };
 
     self.waker = try self.loop.await(&self.display_c, Callback.callback);
-    errdefer self.waker.close();
+    errdefer self.waker.deinit();
 
     self.display_link = try macos.video.DisplayLink.createWithActiveCGDisplays();
     errdefer self.display_link.release();
 
     try self.display_link.setOutputCallback(
-        Waker,
+        async.Waker,
         struct {
-            fn callback(_: *macos.video.DisplayLink, ud: ?*Waker) void {
+            fn callback(_: *macos.video.DisplayLink, ud: ?*async.Waker) void {
                 if (ud) |waker| {
                     waker.wake() catch {};
                 }
@@ -66,5 +64,5 @@ pub fn stop(self: *Display) void {
 
 pub fn deinit(self: *Display) void {
     self.display_link.release();
-    self.waker.close();
+    self.waker.deinit();
 }

@@ -22,164 +22,255 @@ const SinglyLinkedList = datastruct.SinglyLinkedList;
 const scheduler = @import("scheduler.zig");
 const Task = scheduler.Task;
 
-const log = std.log.scoped(.loop);
+const log = std.log.scoped(.async);
 
-pub const Loop = @This();
+pub const Loop = struct {
+    kq: posix.fd_t,
+    wakeup: Wakeup,
+    time: Time,
+    tasks: Mpsc(Completion),
+    canceling: SinglyLinkedList(Completion),
+    submissions: SinglyLinkedList(Completion),
+    completions: SinglyLinkedList(Completion),
+    cancellations: SinglyLinkedList(Completion),
+    timers: heap.Intrusive(Timer, void, Timer.less),
+    inflight: usize,
+    stopped: bool,
+    io: Io,
 
-kq: posix.fd_t,
+    pub fn init(self: *Loop, io: Io) !void {
+        const kq = posix.system.kqueue();
 
-wakeup: Wakeup,
-time: Time,
-tasks: Mpsc(Completion),
-canceling: SinglyLinkedList(Completion),
-submissions: SinglyLinkedList(Completion),
-completions: SinglyLinkedList(Completion),
-cancellations: SinglyLinkedList(Completion),
-timers: heap.Intrusive(Timer, void, Timer.less),
-inflight: usize,
-stopped: bool,
-io: Io,
+        switch (posix.errno(kq)) {
+            .SUCCESS => {},
+            else => |err| return posix.unexpectedErrno(err),
+        }
 
-pub fn init(self: *Loop, io: Io) !void {
-    const kq = posix.system.kqueue();
+        self.* = .{
+            .tasks = undefined,
+            .wakeup = undefined,
+            .io = io,
+            .kq = kq,
+            .inflight = 0,
+            .stopped = false,
+            .timers = .{ .context = {} },
+            .canceling = .empty,
+            .submissions = .empty,
+            .completions = .empty,
+            .cancellations = .empty,
+            .time = undefined,
+        };
 
-    switch (posix.errno(kq)) {
-        .SUCCESS => {},
-        else => |err| return posix.unexpectedErrno(err),
+        self.wakeup = try .init();
+        errdefer self.wakeup.deinit();
+
+        self.tasks.init();
+
+        try self.wakeup.register(self);
     }
 
-    self.* = .{
-        .tasks = undefined,
-        .wakeup = undefined,
-        .io = io,
-        .kq = kq,
-        .inflight = 0,
-        .stopped = false,
-        .timers = .{ .context = {} },
-        .canceling = .empty,
-        .submissions = .empty,
-        .completions = .empty,
-        .cancellations = .empty,
-        .time = undefined,
+    pub fn deinit(self: *Loop) void {
+        assert(self.kq > -1);
+
+        _ = posix.system.close(self.kq);
+        self.kq = -1;
+    }
+
+    pub fn done(self: *Loop) bool {
+        return self.stopped or (self.submissions.is_empty() and
+            self.completions.is_empty() and
+            self.inflight == 0);
+    }
+
+    pub fn stop(self: *Loop) void {
+        self.stopped = true;
+    }
+
+    pub const RunMode = enum {
+        no_wait,
+        once,
+        until_done,
     };
 
-    self.wakeup = try .init();
-    errdefer self.wakeup.deinit();
-
-    self.tasks.init();
-
-    try self.wakeup.register(self);
-}
-
-pub fn deinit(self: *Loop) void {
-    assert(self.kq > -1);
-
-    _ = posix.system.close(self.kq);
-    self.kq = -1;
-}
-
-pub fn done(self: *Loop) bool {
-    return self.stopped or (self.submissions.is_empty() and
-        self.completions.is_empty() and
-        self.inflight == 0);
-}
-
-pub fn stop(self: *Loop) void {
-    self.stopped = true;
-}
-
-pub const RunMode = enum {
-    no_wait,
-    once,
-    until_done,
-};
-
-pub fn run(self: *Loop, mode: RunMode) !void {
-    switch (mode) {
-        .no_wait => try self.tick(false),
-        .once => try self.tick(true),
-        .until_done => while (!self.done()) try self.tick(true),
-    }
-}
-
-pub fn tick(self: *Loop, wait: bool) !void {
-    var should_wait: bool = wait;
-
-    while (self.cancellations.pop()) |completion| {
-        const target: *Completion = completion.operation.cancel;
-        switch (target.state) {
-            .canceled, .idle => {},
-            .completed, .submitted => target.canceled(),
-            .active => switch (target.operation) {
-                .timer => |*timer_op| {
-                    self.timers.remove(timer_op);
-                    target.canceled();
-                    self.inflight -= 1;
-                    self.completions.append(target);
-                },
-                .read => {
-                    target.stopped.store(true, .release);
-                },
-                else => {
-                    target.state = .canceled;
-                    self.canceling.append(target);
-                },
-            },
+    pub fn run(self: *Loop, mode: RunMode) !void {
+        switch (mode) {
+            .no_wait => try self.tick(false),
+            .once => try self.tick(true),
+            .until_done => while (!self.done()) try self.tick(true),
         }
-        completion.result = .cancel;
-        _ = completion.callback(self, completion);
     }
 
-    var kevents: [256]Kevent = undefined;
+    pub fn tick(self: *Loop, wait: bool) !void {
+        var should_wait: bool = wait;
 
-    while (!self.canceling.is_empty() or
-        !self.submissions.is_empty())
-    {
-        var submitted: usize = 0;
-
-        while (submitted < kevents.len) {
-            const event = &kevents[submitted];
-            const completion = self.canceling.pop() orelse break;
-            submitted += 1;
-
-            assert(completion.state == .canceled);
-            self.inflight -= 1;
-
-            completion.kevent(event);
-            event.flags = std.c.EV.DELETE;
-            completion.canceled();
-            self.completions.append(completion);
+        while (self.cancellations.pop()) |completion| {
+            const target: *Completion = completion.operation.cancel;
+            switch (target.state) {
+                .canceled, .idle => {},
+                .completed, .submitted => target.canceled(),
+                .active => switch (target.operation) {
+                    .timer => |*timer_op| {
+                        self.timers.remove(timer_op);
+                        target.canceled();
+                        self.inflight -= 1;
+                        self.completions.append(target);
+                    },
+                    .read => {
+                        target.stopped.store(true, .release);
+                    },
+                    else => {
+                        target.state = .canceled;
+                        self.canceling.append(target);
+                    },
+                },
+            }
+            completion.result = .cancel;
+            _ = completion.callback(self, completion);
         }
 
-        var active: usize = 0;
+        var kevents: [256]Kevent = undefined;
 
-        while (submitted < kevents.len) {
-            const completion = self.submissions.pop() orelse break;
+        while (!self.canceling.is_empty() or
+            !self.submissions.is_empty())
+        {
+            var submitted: usize = 0;
 
-            if (completion.state == .completed) {
+            while (submitted < kevents.len) {
+                const event = &kevents[submitted];
+                const completion = self.canceling.pop() orelse break;
+                submitted += 1;
+
+                assert(completion.state == .canceled);
+                self.inflight -= 1;
+
+                completion.kevent(event);
+                event.flags = std.c.EV.DELETE;
+                completion.canceled();
                 self.completions.append(completion);
-                continue;
             }
 
-            assert(completion.state == .submitted);
+            var active: usize = 0;
 
-            const event = &kevents[active];
-            completion.kevent(event);
-            completion.state = .active;
-            active += 1;
-            submitted += 1;
+            while (submitted < kevents.len) {
+                const completion = self.submissions.pop() orelse break;
+
+                if (completion.state == .completed) {
+                    self.completions.append(completion);
+                    continue;
+                }
+
+                assert(completion.state == .submitted);
+
+                const event = &kevents[active];
+                completion.kevent(event);
+                completion.state = .active;
+                active += 1;
+                submitted += 1;
+            }
+
+            var timeout = std.mem.zeroes(posix.timespec);
+
+            const completed = try kevent(
+                self.kq,
+                kevents[0..submitted],
+                kevents[0..kevents.len],
+                &timeout,
+            );
+
+            self.inflight += active;
+
+            for (kevents[0..completed]) |ev| {
+                if (ev.udata == 0) continue;
+
+                if (ev.flags & std.c.EV.DELETE != 0) continue;
+
+                self.inflight -= 1;
+
+                const c: *Completion = @ptrFromInt(@as(usize, @intCast(ev.udata)));
+
+                if (ev.flags & std.c.EV.ERROR != 0) {
+                    @panic("something go wrong with the kqueue submisssion");
+                } else {
+                    c.result = c.resolve();
+                }
+
+                assert(c.result != null);
+                c.state = .completed;
+                self.completions.append(c);
+            }
         }
 
-        var timeout = std.mem.zeroes(posix.timespec);
+        self.time.update();
+
+        const now_timer: Timer = .{ .next = self.time.now, .ms = 0, .completion = undefined };
+        while (self.timers.peek()) |t| {
+            should_wait = false;
+
+            if (!Timer.less({}, t, &now_timer)) break;
+
+            assert(self.timers.deleteMin().? == t);
+
+            const completion = t.completion;
+            assert(completion.state == .active);
+
+            completion.result = completion.resolve();
+            completion.state = .idle;
+
+            self.inflight -= 1;
+
+            if (completion.callback(self, completion)) {
+                t.next = self.time.next_tick(t.ms);
+                self.timers.insert(t);
+                completion.state = .active;
+                completion.result = null;
+                self.inflight += 1;
+            }
+        }
+
+        while (self.tasks.pop()) |c| {
+            if (c.stopped.raw) c.canceled();
+            c.state = .completed;
+            self.inflight -= 1;
+            self.completions.append(c);
+        }
+
+        while (self.completions.pop()) |completion| {
+            should_wait = false;
+
+            assert(completion.state == .completed);
+            assert(completion.result != null);
+
+            completion.state = .idle;
+
+            if (completion.callback(self, completion)) {
+                completion.result = null;
+                self.submit(completion);
+            }
+        }
+
+        const timeout: ?posix.timespec = timeout: {
+            if (!should_wait) break :timeout std.mem.zeroes(posix.timespec);
+            const t = self.timers.peek() orelse break :timeout null;
+
+            // Determine the time in milliseconds.
+            const ms_now = @as(u64, @intCast(self.time.now.sec)) * std.time.ms_per_s +
+                @as(u64, @intCast(self.time.now.nsec)) / std.time.ns_per_ms;
+            const ms_next = @as(u64, @intCast(t.next.sec)) * std.time.ms_per_s +
+                @as(u64, @intCast(t.next.nsec)) / std.time.ns_per_ms;
+            const ms = ms_next -| ms_now;
+
+            // Convert to s/ns for the timespec
+            const sec = ms / std.time.ms_per_s;
+            const nsec = (ms % std.time.ms_per_s) * std.time.ns_per_ms;
+            break :timeout .{ .sec = @intCast(sec), .nsec = @intCast(nsec) };
+        };
 
         const completed = try kevent(
             self.kq,
-            kevents[0..submitted],
+            kevents[0..0],
             kevents[0..kevents.len],
-            &timeout,
+            if (timeout) |*t| t else null,
         );
-
-        self.inflight += active;
 
         for (kevents[0..completed]) |ev| {
             if (ev.udata == 0) continue;
@@ -197,141 +288,143 @@ pub fn tick(self: *Loop, wait: bool) !void {
             }
 
             assert(c.result != null);
-            c.state = .completed;
-            self.completions.append(c);
+            c.state = .idle;
+
+            if (c.callback(self, c)) {
+                c.result = null;
+                self.submit(c);
+            }
         }
     }
 
-    self.time.update();
+    pub fn submit(self: *Loop, completion: *Completion) void {
+        assert(completion.state == .idle);
 
-    const now_timer: Timer = .{ .next = self.time.now, .ms = 0, .completion = undefined };
-    while (self.timers.peek()) |t| {
-        should_wait = false;
+        switch (completion.operation) {
+            .read => {
+                completion.loop = self;
+                completion.task = .{
+                    .callback = Completion.taskCallback,
+                };
+                completion.state = .active;
+                self.inflight += 1;
+                //TODO: handle the push error
+                scheduler.push(&completion.task) catch unreachable;
+            },
+            .cancel => {
+                completion.state = .submitted;
+                self.cancellations.append(completion);
+            },
+            .machport => {
+                completion.state = .submitted;
+                self.submissions.append(completion);
+            },
+            .timer => {
+                const c_timer = completion.operation.timer;
+                completion.operation.timer.next = self.time.next_tick(c_timer.ms);
+                completion.state = .active;
+                self.inflight += 1;
 
-        if (!Timer.less({}, t, &now_timer)) break;
-
-        assert(self.timers.deleteMin().? == t);
-
-        const completion = t.completion;
-        assert(completion.state == .active);
-
-        completion.result = completion.resolve();
-        completion.state = .idle;
-
-        self.inflight -= 1;
-
-        if (completion.callback(self, completion)) {
-            t.next = self.time.next_tick(t.ms);
-            self.timers.insert(t);
-            completion.state = .active;
-            completion.result = null;
-            self.inflight += 1;
+                self.timers.insert(&completion.operation.timer);
+            },
+            .noop => unreachable,
         }
     }
 
-    while (self.tasks.pop()) |c| {
-        if (c.stopped.raw) c.canceled();
-        c.state = .completed;
-        self.inflight -= 1;
-        self.completions.append(c);
+    pub fn mach(
+        self: *Loop,
+        completion: *Completion,
+        function: anytype,
+        data: MachPort,
+    ) void {
+        completion.set(
+            function,
+            .machport,
+            data,
+        );
+
+        self.submit(completion);
     }
 
-    while (self.completions.pop()) |completion| {
-        should_wait = false;
+    pub fn cancel(
+        self: *Loop,
+        completion: *Completion,
+        function: anytype,
+        target: *Completion,
+    ) void {
+        completion.set(
+            function,
+            .cancel,
+            target,
+        );
 
-        assert(completion.state == .completed);
-        assert(completion.result != null);
-
-        completion.state = .idle;
-
-        if (completion.callback(self, completion)) {
-            completion.result = null;
-            self.submit(completion);
-        }
+        self.submit(completion);
     }
 
-    const timeout: ?posix.timespec = timeout: {
-        if (!should_wait) break :timeout std.mem.zeroes(posix.timespec);
-        const t = self.timers.peek() orelse break :timeout null;
+    pub fn timer(
+        self: *Loop,
+        completion: *Completion,
+        callback: anytype,
+        ms: u64,
+    ) void {
+        completion.set(
+            callback,
+            .timer,
+            .{
+                .next = undefined,
+                .completion = completion,
+                .ms = ms,
+            },
+        );
 
-        // Determine the time in milliseconds.
-        const ms_now = @as(u64, @intCast(self.time.now.sec)) * std.time.ms_per_s +
-            @as(u64, @intCast(self.time.now.nsec)) / std.time.ns_per_ms;
-        const ms_next = @as(u64, @intCast(t.next.sec)) * std.time.ms_per_s +
-            @as(u64, @intCast(t.next.nsec)) / std.time.ns_per_ms;
-        const ms = ms_next -| ms_now;
-
-        // Convert to s/ns for the timespec
-        const sec = ms / std.time.ms_per_s;
-        const nsec = (ms % std.time.ms_per_s) * std.time.ns_per_ms;
-        break :timeout .{ .sec = @intCast(sec), .nsec = @intCast(nsec) };
-    };
-
-    const completed = try kevent(
-        self.kq,
-        kevents[0..0],
-        kevents[0..kevents.len],
-        if (timeout) |*t| t else null,
-    );
-
-    for (kevents[0..completed]) |ev| {
-        if (ev.udata == 0) continue;
-
-        if (ev.flags & std.c.EV.DELETE != 0) continue;
-
-        self.inflight -= 1;
-
-        const c: *Completion = @ptrFromInt(@as(usize, @intCast(ev.udata)));
-
-        if (ev.flags & std.c.EV.ERROR != 0) {
-            @panic("something go wrong with the kqueue submisssion");
-        } else {
-            c.result = c.resolve();
-        }
-
-        assert(c.result != null);
-        c.state = .idle;
-
-        if (c.callback(self, c)) {
-            c.result = null;
-            self.submit(c);
-        }
+        self.submit(completion);
     }
-}
 
-pub fn submit(self: *Loop, completion: *Completion) void {
-    assert(completion.state == .idle);
+    pub fn read(
+        self: *Loop,
+        completion: *Completion,
+        callback: anytype,
+        fd: posix.fd_t,
+        buffer: ReadBuffer,
+    ) void {
+        completion.set(
+            callback,
+            .read,
+            .{
+                .fd = fd,
+                .buffer = buffer,
+            },
+        );
 
-    switch (completion.operation) {
-        .read => {
-            completion.loop = self;
-            completion.task = .{
-                .callback = Completion.taskCallback,
+        self.submit(completion);
+    }
+    pub fn await(
+        self: *Loop,
+        completion: *Completion,
+        function: anytype,
+    ) !Waker {
+        const waker: Waker = try .init();
+
+        const TypeErased =
+            struct {
+                fn complete(c: *Completion, loop: *Loop, res: Canceled!void) bool {
+                    Mach.drain(c.operation.machport.port);
+
+                    return @call(.always_inline, function, .{ c, loop, res });
+                }
             };
-            completion.state = .active;
-            self.inflight += 1;
-            //TODO: handle the push error
-            scheduler.push(&completion.task) catch unreachable;
-        },
-        .cancel => {
-            completion.state = .submitted;
-            self.cancellations.append(completion);
-        },
-        .machport => {
-            completion.state = .submitted;
-            self.submissions.append(completion);
-        },
-        .timer => {
-            const c_timer = completion.operation.timer;
-            completion.operation.timer.next = self.time.next_tick(c_timer.ms);
-            completion.state = .active;
-            self.inflight += 1;
 
-            self.timers.insert(&completion.operation.timer);
-        },
-        .noop => unreachable,
+        completion.set(
+            TypeErased.complete,
+            .machport,
+            .{ .port = waker.port, .buffer = .{ .array = undefined } },
+        );
+
+        self.submit(completion);
+
+        return waker;
     }
-}
+};
 
 fn kevent(
     kq: posix.fd_t,
@@ -599,74 +692,6 @@ const Timer = struct {
     }
 };
 
-pub fn mach(
-    self: *Loop,
-    completion: *Completion,
-    function: anytype,
-    data: MachPort,
-) void {
-    completion.set(
-        function,
-        .machport,
-        data,
-    );
-
-    self.submit(completion);
-}
-
-pub fn cancel(
-    self: *Loop,
-    completion: *Completion,
-    function: anytype,
-    target: *Completion,
-) void {
-    completion.set(
-        function,
-        .cancel,
-        target,
-    );
-
-    self.submit(completion);
-}
-
-pub fn timer(
-    self: *Loop,
-    completion: *Completion,
-    callback: anytype,
-    ms: u64,
-) void {
-    completion.set(
-        callback,
-        .timer,
-        .{
-            .next = undefined,
-            .completion = completion,
-            .ms = ms,
-        },
-    );
-
-    self.submit(completion);
-}
-
-pub fn read(
-    self: *Loop,
-    completion: *Completion,
-    callback: anytype,
-    fd: posix.fd_t,
-    buffer: ReadBuffer,
-) void {
-    completion.set(
-        callback,
-        .read,
-        .{
-            .fd = fd,
-            .buffer = buffer,
-        },
-    );
-
-    self.submit(completion);
-}
-
 const Mach = struct {
     const mach_port_flavor_t = c_int;
 
@@ -711,33 +736,6 @@ const Mach = struct {
     }
 };
 
-pub fn await(
-    self: *Loop,
-    completion: *Completion,
-    function: anytype,
-) !Waker {
-    const waker: Waker = try .init();
-
-    const TypeErased =
-        struct {
-            fn complete(c: *Completion, loop: *Loop, res: Canceled!void) bool {
-                Mach.drain(c.operation.machport.port);
-
-                return @call(.always_inline, function, .{ c, loop, res });
-            }
-        };
-
-    completion.set(
-        TypeErased.complete,
-        .machport,
-        .{ .port = waker.port, .buffer = .{ .array = undefined } },
-    );
-
-    self.submit(completion);
-
-    return waker;
-}
-
 const Wakeup = struct {
     waker: Waker,
     buffer: [32]u8,
@@ -749,7 +747,7 @@ const Wakeup = struct {
     }
 
     pub fn deinit(self: *Wakeup) void {
-        self.waker.close();
+        self.waker.deinit();
     }
 
     pub fn wake(self: *Wakeup) !void {
@@ -852,7 +850,7 @@ pub const Waker = struct {
         }
     }
 
-    pub fn close(self: *const Waker) void {
+    pub fn deinit(self: *const Waker) void {
         _ = Mach.mach_port_destroy(
             posix.system.mach_task_self(),
             self.port,
