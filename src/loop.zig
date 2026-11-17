@@ -19,8 +19,8 @@ const datastruct = @import("datastruct.zig");
 const Mpsc = datastruct.Mpsc;
 const heap = datastruct.heap;
 const SinglyLinkedList = datastruct.SinglyLinkedList;
-const Scheduler = @import("scheduler.zig");
-const Task = Scheduler.Task;
+const scheduler = @import("scheduler.zig");
+const Task = scheduler.Task;
 
 const log = std.log.scoped(.loop);
 
@@ -30,7 +30,6 @@ kq: posix.fd_t,
 
 wakeup: Wakeup,
 time: Time,
-scheduler: *Scheduler,
 tasks: Mpsc(Completion),
 canceling: SinglyLinkedList(Completion),
 submissions: SinglyLinkedList(Completion),
@@ -41,7 +40,7 @@ inflight: usize,
 stopped: bool,
 io: Io,
 
-pub fn init(self: *Loop, scheduler: *Scheduler, io: Io) !void {
+pub fn init(self: *Loop, io: Io) !void {
     const kq = posix.system.kqueue();
 
     switch (posix.errno(kq)) {
@@ -52,7 +51,6 @@ pub fn init(self: *Loop, scheduler: *Scheduler, io: Io) !void {
     self.* = .{
         .tasks = undefined,
         .wakeup = undefined,
-        .scheduler = scheduler,
         .io = io,
         .kq = kq,
         .inflight = 0,
@@ -313,7 +311,7 @@ pub fn submit(self: *Loop, completion: *Completion) void {
             completion.state = .active;
             self.inflight += 1;
             //TODO: handle the push error
-            self.scheduler.push(&completion.task) catch unreachable;
+            scheduler.push(&completion.task) catch unreachable;
         },
         .cancel => {
             completion.state = .submitted;
@@ -866,7 +864,7 @@ test "mach port" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(undefined, io);
+    try loop.init(io);
     defer loop.deinit();
 
     const mach_self = posix.system.mach_task_self();
@@ -955,7 +953,7 @@ test "cancel mach port" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(undefined, io);
+    try loop.init(io);
     defer loop.deinit();
 
     const mach_self = posix.system.mach_task_self();
@@ -1050,7 +1048,7 @@ test "timer completes" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(undefined, io);
+    try loop.init(io);
     defer loop.deinit();
 
     const TimerTest = struct {
@@ -1082,7 +1080,7 @@ test "timer rearms when callback returns true" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(undefined, io);
+    try loop.init(io);
     defer loop.deinit();
 
     const TimerTest = struct {
@@ -1114,7 +1112,7 @@ test "cancel timer" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(undefined, io);
+    try loop.init(io);
     defer loop.deinit();
 
     const TimerTest = struct {
@@ -1178,12 +1176,11 @@ test "read completion" {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
 
-    var scheduler: Scheduler = undefined;
     try scheduler.init(arena.allocator(), io);
     defer scheduler.deinit();
 
     var loop: Loop = undefined;
-    try loop.init(&scheduler, io);
+    try loop.init(io);
     defer loop.deinit();
 
     var temp = std.testing.tmpDir(.{});

@@ -4,7 +4,7 @@ const Io = std.Io;
 const Bench = @import("bench.zig");
 const Buffer = @import("buffer.zig");
 const chunk_pool = @import("chunk_pool.zig");
-const chunked_path = @import("chunked_path.zig");
+const ChunkedPath = @import("chunked_path.zig");
 const app = @import("app.zig");
 const datastruct = @import("datastruct.zig");
 const font = @import("font.zig");
@@ -13,8 +13,8 @@ const log = @import("log.zig");
 const Loop = @import("loop.zig");
 const patch = @import("patch.zig");
 const renderer = @import("renderer.zig");
-const Scheduler = @import("scheduler.zig");
-const View = @import("view.zig");
+const scheduler = @import("scheduler.zig");
+const view = @import("view.zig");
 const win = @import("window.zig");
 
 pub const std_options: std.Options = .{
@@ -27,6 +27,9 @@ pub fn main(init: std.process.Init) !void {
 
     try global.init();
     defer global.deinit();
+
+    try scheduler.init(gpa, io);
+    defer scheduler.deinit();
 
     try renderer.init();
     defer renderer.deinit();
@@ -54,14 +57,14 @@ pub fn main(init: std.process.Init) !void {
 
 test {
     _ = font;
-    _ = View;
+    _ = view;
     _ = renderer;
-    _ = Scheduler;
+    _ = scheduler;
     _ = Bench;
     _ = patch;
     _ = Buffer;
     _ = chunk_pool;
-    _ = chunked_path;
+    _ = ChunkedPath;
     _ = datastruct;
     _ = Loop;
 }

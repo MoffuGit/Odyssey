@@ -16,79 +16,89 @@ const datastruct = @import("datastruct.zig");
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const global = @import("global.zig");
 
-const Scheduler = @This();
 const log = std.log.scoped(.scheduler);
 
-queued: atomic.Value(u64),
-workers: atomic.Value(?*Worker),
-mutex: Io.Mutex,
-cond: Io.Condition,
-closed: atomic.Value(bool),
-group: Io.Group,
-io: Io,
-queue: Queue,
+pub var scheduler: Scheduler = undefined;
 
-pub fn init(self: *Scheduler, arena: Allocator, io: Io) !void {
-    self.* = .{
+const Scheduler = struct {
+    arena: heap.ArenaAllocator,
+    queued: atomic.Value(u64),
+    workers: atomic.Value(?*Worker),
+    mutex: Io.Mutex,
+    cond: Io.Condition,
+    closed: atomic.Value(bool),
+    group: Io.Group,
+    io: Io,
+    queue: Queue,
+};
+
+pub fn init(gpa: Allocator, io: Io) !void {
+    scheduler = .{
         .queued = .init(0),
         .queue = .{},
         .workers = .init(null),
         .closed = .init(false),
+        .arena = .init(gpa),
         .mutex = .init,
         .group = .init,
         .cond = .init,
         .io = io,
     };
 
+    const arena = scheduler.arena.allocator();
+    errdefer scheduler.arena.deinit();
+
     const workers = try arena.alloc(Worker, global.cpu_count);
 
     for (workers) |*worker| {
-        try self.group.concurrent(io, Worker.run, .{ worker, self });
+        try scheduler.group.concurrent(io, Worker.run, .{worker});
     }
 }
 
-pub fn deinit(self: *Scheduler) void {
-    self.closed.store(true, .release);
-    self.wakeAll();
+pub fn deinit() void {
+    scheduler.closed.store(true, .release);
+    wakeAll();
 
-    self.group.await(self.io) catch |err| {
+    scheduler.group.await(scheduler.io) catch |err| {
         log.err("Scanner err={}", .{err});
     };
+
+    scheduler.arena.deinit();
 }
 
-pub fn taskAdded(self: *Scheduler) void {
-    const queued = self.queued.fetchAdd(1, .release);
-    if (queued < global.cpu_count) self.wakeOne();
+pub fn taskAdded() void {
+    const queued = scheduler.queued.fetchAdd(1, .release);
+    if (queued < global.cpu_count) wakeOne();
 }
 
-pub fn wakeAll(self: *Scheduler) void {
-    self.mutex.lock(self.io) catch unreachable;
-    defer self.mutex.unlock(self.io);
-    self.cond.broadcast(self.io);
+pub fn wakeAll() void {
+    scheduler.mutex.lock(scheduler.io) catch unreachable;
+    defer scheduler.mutex.unlock(scheduler.io);
+    scheduler.cond.broadcast(scheduler.io);
 }
 
-pub fn wakeOne(self: *Scheduler) void {
-    self.mutex.lock(self.io) catch unreachable;
-    defer self.mutex.unlock(self.io);
-    self.cond.signal(self.io);
+pub fn wakeOne() void {
+    scheduler.mutex.lock(scheduler.io) catch unreachable;
+    defer scheduler.mutex.unlock(scheduler.io);
+    scheduler.cond.signal(scheduler.io);
 }
 
-pub fn push(self: *Scheduler, task: *Task) !void {
-    if (self.closed.load(.acquire)) return error.Closed;
+pub fn push(task: *Task) !void {
+    if (scheduler.closed.load(.acquire)) return error.Closed;
 
     if (Worker.local) |local| {
-        local.push(task, self.io);
+        local.push(task);
     } else {
-        self.queue.push(task, self.io);
+        scheduler.queue.push(task);
     }
-    self.taskAdded();
+    taskAdded();
 }
 
-fn register(self: *Scheduler, worker: *Worker) void {
-    var head = self.workers.load(.monotonic);
+fn register(worker: *Worker) void {
+    var head = scheduler.workers.load(.monotonic);
     while (true) {
         worker.next = head;
-        head = self.workers.cmpxchgWeak(
+        head = scheduler.workers.cmpxchgWeak(
             head,
             worker,
             .release,
@@ -104,7 +114,7 @@ const Worker = struct {
 
     threadlocal var local: ?*Worker = null;
 
-    pub fn run(self: *Worker, scheduler: *Scheduler) Io.Cancelable!void {
+    pub fn run(self: *Worker) Io.Cancelable!void {
         self.* = .{
             .queue = .{},
             .next = null,
@@ -113,19 +123,19 @@ const Worker = struct {
 
         local = self;
 
-        scheduler.register(self);
+        register(self);
 
         while (true) {
-            const task = try self.pop(scheduler);
+            const task = try self.pop();
             _ = scheduler.queued.fetchSub(1, .acq_rel);
             task.callback(task);
         }
     }
 
-    pub fn pop(self: *Worker, scheduler: *Scheduler) !*Task {
+    pub fn pop(self: *Worker) !*Task {
         while (true) {
-            if (self.queue.pop(scheduler.io)) |task| return task;
-            if (scheduler.queue.pop(scheduler.io)) |task| return task;
+            if (self.queue.pop()) |task| return task;
+            if (scheduler.queue.pop()) |task| return task;
 
             for (0..global.cpu_count) |_| {
                 const target = self.target orelse scheduler.workers.load(.acquire) orelse unreachable;
@@ -133,7 +143,7 @@ const Worker = struct {
 
                 if (target == self) continue;
 
-                if (target.queue.pop(scheduler.io)) |task| return task;
+                if (target.queue.pop()) |task| return task;
             }
 
             if (scheduler.closed.load(.acquire)) return error.Canceled;
@@ -146,8 +156,8 @@ const Worker = struct {
         }
     }
 
-    pub fn push(self: *Worker, task: *Task, io: Io) void {
-        self.queue.push(task, io);
+    pub fn push(self: *Worker, task: *Task) void {
+        self.queue.push(task);
     }
 };
 
@@ -155,18 +165,18 @@ const Queue = struct {
     mutex: Io.Mutex = .init,
     tasks: SinglyLinkedList(Task) = .empty,
 
-    pub fn pop(self: *@This(), io: Io) ?*Task {
-        self.mutex.lock(io) catch unreachable;
-        defer self.mutex.unlock(io);
+    pub fn pop(self: *@This()) ?*Task {
+        self.mutex.lock(scheduler.io) catch unreachable;
+        defer self.mutex.unlock(scheduler.io);
 
         return self.tasks.pop();
     }
 
-    pub fn push(self: *@This(), task: *Task, io: Io) void {
+    pub fn push(self: *@This(), task: *Task) void {
         asserts(task.next == null);
 
-        self.mutex.lock(io) catch unreachable;
-        defer self.mutex.unlock(io);
+        self.mutex.lock(scheduler.io) catch unreachable;
+        defer self.mutex.unlock(scheduler.io);
 
         return self.tasks.append(task);
     }
@@ -187,13 +197,8 @@ pub const Task = struct {
 test "Scheduler" {
     const io = testing.io;
     const gpa = testing.allocator;
-    var arena = heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
 
-    const alloc = arena.allocator();
-
-    var scheduler: Scheduler = undefined;
-    try scheduler.init(alloc, io);
+    try init(gpa, io);
 
     const TestTask = struct {
         const Self = @This();
@@ -212,9 +217,9 @@ test "Scheduler" {
         .task = .{ .callback = TestTask.callback },
     };
 
-    try scheduler.push(&test_task.task);
+    try push(&test_task.task);
 
-    scheduler.deinit();
+    deinit();
 
     try testing.expectEqual(1, test_task.count);
 }
