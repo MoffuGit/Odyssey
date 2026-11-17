@@ -87,15 +87,17 @@ fn display() bool {
 
     win.poll();
     while (win.popEvent()) |evt| {
+        const state: *WindowState = @ptrCast(@alignCast(evt.win.userdata()));
+
         switch (evt.type) {
             .window_update => |update| {
                 if (update.type == .window_close) {
-                    const state: *WindowState = @ptrCast(@alignCast(evt.win.userdata()));
                     state.deinit();
                     core.window_states.remove(state);
                     chunks.destroy(state);
                 }
             },
+            .mouse_button => state.view.pushEvent(evt.type),
             else => {},
         }
     }
@@ -131,9 +133,7 @@ pub fn render() !void {
     var win_iter = core.window_states.iterator();
     while (win_iter.next()) |ws| {
         {
-            view.setView(&ws.view);
-
-            view.begin(ws.win, ws.resize, core.collection);
+            view.begin(&ws.view, ws.win, ws.resize, core.collection);
             defer view.finish();
 
             view.background(.{ 1.0, 0.0, 0.0, 1.0 });

@@ -79,13 +79,29 @@ pub const View = struct {
         for (self.frame_arenas) |arena| arena.deinit();
         self.arena.deinit();
     }
+
+    pub fn pushEvent(self: *View, @"type": win.EventType) void {
+        const chunks = self.frameChunks();
+
+        const event = chunks.create(Event) catch @panic("Chunk Overflow");
+
+        event.* = .{ .type = @"type" };
+
+        self.events.append(event);
+    }
+
+    fn frameArena(self: *View) Allocator {
+        return self.frame_arenas[self.frame % self.frame_arenas.len].allocator();
+    }
+
+    fn frameChunks(self: *View) Allocator {
+        return self.frame_chunks[self.frame % self.frame_arenas.len].allocator();
+    }
 };
 
-pub fn setView(view: *View) void {
+pub fn begin(view: *View, window: Window, resize: bool, fnt: u64) void {
     local = view;
-}
 
-pub fn begin(window: Window, resize: bool, fnt: u64) void {
     const window_size = window.size() catch .{ 0.0, 0.0 };
 
     local.root = null;
@@ -195,7 +211,7 @@ pub fn displayString(str: []const u8) []const u8 {
 }
 
 pub fn setDisplayString(block: *Block, str: []const u8) void {
-    const arena = frameArena();
+    const arena = local.frameArena();
 
     const dupe = arena.dupe(u8, str) catch return;
     const display = displayString(str);
@@ -211,16 +227,6 @@ pub fn setDisplayString(block: *Block, str: []const u8) void {
         log.err("Run err={}", .{err});
         return;
     };
-}
-
-pub fn pushEvent(@"type": win.EventType) void {
-    const chunks = local.frameChunks();
-
-    const event = chunks.create(Event) catch @panic("Chunk Overflow");
-
-    event.* = .{ .type = @"type" };
-
-    local.events.append(event);
 }
 
 pub fn signal(block: *Block) Signal {
@@ -308,7 +314,7 @@ const Options = struct {
 };
 
 pub fn blk(options: Options) *Block {
-    const frame_chunks = frameChunks();
+    const frame_chunks = local.frameChunks();
     const chunks = local.chunks.allocator();
 
     const cached = bkl: {
@@ -380,7 +386,7 @@ fn blkComplete(block: *Block) void {
 }
 
 pub fn pushAttr(attr: Attribute) void {
-    const chunks = frameChunks();
+    const chunks = local.frameChunks();
 
     switch (attr) {
         inline else => |value, flag| {
@@ -396,7 +402,7 @@ pub fn pushAttr(attr: Attribute) void {
 pub fn popAttr(comptime field: StackField) void {
     assert(local.pop_flags & stackFlag(field) == 0);
 
-    const chunks = frameChunks();
+    const chunks = local.frameChunks();
     const node = local.stacks.pop(field) orelse unreachable;
     chunks.destroy(node);
 }
@@ -410,14 +416,6 @@ pub fn nextAttr(attr: Attribute) void {
 
     pushAttr(attr);
     flagStack(meta.activeTag(attr));
-}
-
-fn frameArena() Allocator {
-    return local.frame_arenas[local.frame % local.frame_arenas.len].allocator();
-}
-
-fn frameChunks() Allocator {
-    return local.frame_chunks[local.frame % local.frame_arenas.len].allocator();
 }
 
 fn flagStack(field: StackField) void {
