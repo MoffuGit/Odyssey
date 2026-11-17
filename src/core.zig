@@ -87,17 +87,17 @@ fn display() bool {
 
     win.poll();
     while (win.popEvent()) |evt| {
-        const state: *WindowState = @ptrCast(@alignCast(evt.win.userdata()));
+        const window_state: *WindowState = @ptrCast(@alignCast(evt.win.userdata()));
 
         switch (evt.type) {
             .window_update => |update| {
                 if (update.type == .window_close) {
-                    state.deinit();
-                    core.window_states.remove(state);
-                    chunks.destroy(state);
+                    window_state.deinit();
+                    core.window_states.remove(window_state);
+                    chunks.destroy(window_state);
                 }
             },
-            .mouse_button => state.view.pushEvent(evt.type),
+            .mouse_button => window_state.view.pushEvent(evt.type),
             else => {},
         }
     }
@@ -131,9 +131,9 @@ pub fn openWindow(opts: win.Options) !void {
 
 pub fn render() !void {
     var win_iter = core.window_states.iterator();
-    while (win_iter.next()) |ws| {
+    while (win_iter.next()) |window_state| {
         {
-            view.begin(&ws.view, ws.win, ws.resize, core.collection);
+            view.begin(&window_state.view, window_state.win, window_state.resize, core.collection);
             defer view.finish();
 
             view.background(.{ 1.0, 0.0, 0.0, 1.0 });
@@ -175,18 +175,18 @@ pub fn render() !void {
         }
 
         {
-            const frame = ws.handle.nextFrame();
-            errdefer ws.handle.releaseFrame();
+            const frame = window_state.handle.nextFrame();
+            errdefer window_state.handle.releaseFrame();
 
             frame.uniforms = .{
-                .viewport_size = try ws.win.size(),
+                .viewport_size = try window_state.win.size(),
             };
 
             if (frame.atlas_gen != font.cache.atlas_gen) {
                 try frame.syncAtlas(&font.cache.atlas);
             }
 
-            var node = ws.view.root;
+            var node = window_state.view.root;
             while (node) |block| : (node = block.nextPre()) {
                 const rect = block.rect[0] ++ block.rect[1];
 
@@ -258,7 +258,7 @@ pub fn render() !void {
                 }
             }
 
-            renderer.render(&ws.handle, frame, ws.resize);
+            renderer.render(&window_state.handle, frame, window_state.resize);
         }
     }
 
