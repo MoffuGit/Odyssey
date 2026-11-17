@@ -6,8 +6,7 @@ const assert = std.debug.assert;
 const Io = std.Io;
 const Duration = Io.Duration;
 const Timestamp = Io.Timestamp;
-
-const log = @import("log.zig");
+const global = @import("global.zig");
 
 pub const mode: enum { smoke, benchmark } =
     // See build.zig for how this is ultimately determined.
@@ -125,6 +124,6 @@ fn asc(_: void, a: Duration, b: Duration) bool {
 pub fn report(comptime fmt: []const u8, args: anytype) void {
     switch (mode) {
         .smoke => {},
-        .benchmark => log.logFn(.err, .bench, fmt, args),
+        .benchmark => global.logFn(.err, .bench, fmt, args),
     }
 }
