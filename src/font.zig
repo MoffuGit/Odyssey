@@ -18,7 +18,9 @@ const embedded = @import("embedded.zig");
 
 const log = std.log.scoped(.font_cache);
 
-pub var cache: struct {
+pub var cache: Cache = undefined;
+
+const Cache = struct {
     arena: ArenaAllocator,
     gpa: Allocator,
     data: HashTable(u64, Data, Data.Context),
@@ -28,7 +30,7 @@ pub var cache: struct {
     atlas_gen: u64,
     buffer: std.ArrayList(u8),
     piece_buffer: std.ArrayList(Piece),
-} = undefined;
+};
 
 pub fn init(gpa: Allocator) !void {
     cache = .{
