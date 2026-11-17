@@ -27,9 +27,9 @@ const TypeInfo = type_id.TypeInfo;
 const view = @import("view.zig");
 const win = @import("window.zig");
 
-const log = std.log.scoped(.core);
+const log = std.log.scoped(.app);
 
-var core: struct {
+var app: struct {
     io: Io,
     gpa: Allocator,
     arena: ArenaAllocator,
@@ -41,7 +41,7 @@ var core: struct {
 } = undefined;
 
 pub fn init(gpa: Allocator, io: Io) !void {
-    core = .{
+    app = .{
         .collection = 0,
         .frame = 0,
         .io = io,
@@ -53,37 +53,37 @@ pub fn init(gpa: Allocator, io: Io) !void {
     };
 
     const inter = try font.fromBytes(embedded.geist_mono, 0);
-    core.collection = try font.addCollection(&.{inter});
+    app.collection = try font.addCollection(&.{inter});
 
-    const arena = core.arena.allocator();
-    errdefer core.arena.deinit();
+    const arena = app.arena.allocator();
+    errdefer app.arena.deinit();
 
-    try core.chunks.init(arena, &.{
+    try app.chunks.init(arena, &.{
         .{
             .capacity = 50,
             .chunk_size = @sizeOf(WindowState),
         },
     });
 
-    try core.display.init(display, io);
-    errdefer core.display.deinit();
+    try app.display.init(display, io);
+    errdefer app.display.deinit();
 
     win.setEventCallback(.window_resized, windowResize);
 }
 
 pub fn deinit() void {
-    core.display.deinit();
-    core.arena.deinit();
+    app.display.deinit();
+    app.arena.deinit();
 }
 
 pub fn run() !void {
-    try core.display.run();
+    try app.display.run();
 }
 
 fn display() bool {
-    if (core.window_states.is_empty()) core.display.stop();
+    if (app.window_states.is_empty()) app.display.stop();
 
-    const chunks = core.chunks.allocator();
+    const chunks = app.chunks.allocator();
 
     win.poll();
     while (win.popEvent()) |evt| {
@@ -93,7 +93,7 @@ fn display() bool {
             .window_update => |update| {
                 if (update.type == .window_close) {
                     window_state.deinit();
-                    core.window_states.remove(window_state);
+                    app.window_states.remove(window_state);
                     chunks.destroy(window_state);
                 }
             },
@@ -122,18 +122,18 @@ fn windowResize(event: win.Event) void {
 }
 
 pub fn openWindow(opts: win.Options) !void {
-    const chunks = core.chunks.allocator();
+    const chunks = app.chunks.allocator();
     const window_state = try chunks.create(WindowState);
     try window_state.init(opts);
 
-    core.window_states.append(window_state);
+    app.window_states.append(window_state);
 }
 
 pub fn render() !void {
-    var win_iter = core.window_states.iterator();
+    var win_iter = app.window_states.iterator();
     while (win_iter.next()) |window_state| {
         {
-            view.begin(&window_state.view, window_state.win, window_state.resize, core.collection);
+            view.begin(&window_state.view, window_state.win, window_state.resize, app.collection);
             defer view.finish();
 
             view.background(.{ 1.0, 0.0, 0.0, 1.0 });
@@ -262,7 +262,7 @@ pub fn render() !void {
         }
     }
 
-    core.frame += 1;
+    app.frame += 1;
 }
 
 pub const WindowState = struct {
@@ -282,7 +282,7 @@ pub const WindowState = struct {
             .handle = undefined,
         };
 
-        try self.view.init(core.gpa);
+        try self.view.init(app.gpa);
         errdefer self.view.deinit();
 
         try self.win.init(opts);
@@ -290,7 +290,7 @@ pub const WindowState = struct {
 
         self.win.setUserdata(self);
 
-        try self.handle.init(&self.win, core.gpa, core.io);
+        try self.handle.init(&self.win, app.gpa, app.io);
     }
 
     pub fn deinit(self: *WindowState) void {
