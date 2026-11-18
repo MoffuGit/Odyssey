@@ -5,6 +5,7 @@ const Io = std.Io;
 
 const async = @import("async.zig");
 const datastruct = @import("datastruct.zig");
+const queue = datastruct.queue;
 const slotmap = datastruct.slotmap;
 const Slotmap = slotmap.SlotMap;
 const Key = slotmap.Key;
@@ -24,6 +25,9 @@ pub const Core = struct {
     stop: async.Waker,
     stop_c: async.Completion,
 
+    events: queue.Spsc(Event),
+    commands: queue.Spsc(Command),
+
     loop: async.Loop,
     store: Slotmap(Entity),
     future: Io.Future(void),
@@ -42,10 +46,15 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .future = undefined,
         .store = undefined,
         .root = undefined,
+        .commands = undefined,
+        .events = undefined,
     };
 
     const arena = core.arena.allocator();
     errdefer core.arena.deinit();
+
+    core.events = try .init(128, arena);
+    core.commands = try .init(128, arena);
 
     core.store = try .init(arena, 128);
 
@@ -93,8 +102,26 @@ fn stopCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool {
 fn wakeupCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool {
     res catch unreachable;
 
+    var buffer: [128]Command = undefined;
+
+    const read = core.commands.pop(&buffer);
+
+    for (buffer[0..read]) |cmd| {
+        log.debug("cmd: {}", .{cmd});
+
+        core.events.push(.{ .id = cmd.id });
+    }
+
     return true;
 }
+
+pub const Event = struct {
+    id: u64,
+};
+
+pub const Command = struct {
+    id: u64,
+};
 
 pub const EntityKind = enum {
     root,

@@ -10,20 +10,15 @@ pub const heap = @import("datastruct/heap.zig");
 pub const linked_list = @import("datastruct/linked_list.zig");
 pub const SinglyLinkedList = linked_list.SinglyLinkedList;
 pub const mem_map = @import("datastruct/memory_map.zig");
-pub const mpsc = @import("datastruct/mpsc.zig");
-pub const MpscBounded = mpsc.MpscBounded;
-pub const Mpsc = mpsc.Mpsc;
+pub const queue = @import("datastruct/queue.zig");
 pub const slotmap = @import("datastruct/slotmap.zig");
-pub const spsc = @import("datastruct/spsc.zig");
-pub const SpscBounded = spsc.SpscBounded;
 pub const tagged_linked_list = @import("datastruct/tagged_linked_list.zig");
 pub const TaggedLinkedList = tagged_linked_list.TaggedLinkedList;
 
 test {
+    _ = queue;
     _ = Atlas;
     _ = hash_table;
-    _ = mpsc;
-    _ = spsc;
     _ = mem_map;
     _ = linked_list;
     _ = doubly_linked_list;

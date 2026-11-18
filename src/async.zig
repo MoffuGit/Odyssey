@@ -16,8 +16,8 @@ const atomic = std.atomic;
 const builtin = @import("builtin");
 
 const datastruct = @import("datastruct.zig");
-const Mpsc = datastruct.Mpsc;
 const heap = datastruct.heap;
+const queue = datastruct.queue;
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const scheduler = @import("scheduler.zig");
 const Task = scheduler.Task;
@@ -28,7 +28,7 @@ pub const Loop = struct {
     kq: posix.fd_t,
     wakeup: Wakeup,
     time: Time,
-    tasks: Mpsc(Completion),
+    tasks: queue.IntrusiveMpsc(Completion),
     canceling: SinglyLinkedList(Completion),
     submissions: SinglyLinkedList(Completion),
     completions: SinglyLinkedList(Completion),

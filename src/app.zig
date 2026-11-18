@@ -9,6 +9,7 @@ const Io = std.Io;
 const assert = std.debug.assert;
 const testing = std.testing;
 
+const core = @import("core.zig");
 const chunk_pool = @import("chunk_pool.zig");
 const ChunkAllocator = chunk_pool.ChunkAllocator;
 const datastruct = @import("datastruct.zig");
@@ -130,6 +131,16 @@ pub fn openWindow(opts: win.Options) !void {
 }
 
 pub fn render() !void {
+    core.core.commands.push(.{ .id = app.frame });
+    core.core.wakeup.wake() catch {};
+    var buffer: [128]core.Event = undefined;
+
+    const read = core.core.events.pop(&buffer);
+
+    for (buffer[0..read]) |evt| {
+        log.debug("evt: {}", .{evt});
+    }
+
     var win_iter = app.window_states.iterator();
     while (win_iter.next()) |window_state| {
         {
