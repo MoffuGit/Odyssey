@@ -129,13 +129,7 @@ pub fn openWindow(opts: win.Options) !void {
 }
 
 pub fn render() !void {
-    var buffer: [128]core.Event = undefined;
-
-    const read = core.core.events.pop(&buffer);
-
-    for (buffer[0..read]) |evt| {
-        log.debug("evt: {}", .{evt});
-    }
+    core.tick();
 
     var win_iter = app.window_states.iterator();
     while (win_iter.next()) |window_state| {

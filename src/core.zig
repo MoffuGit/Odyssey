@@ -91,6 +91,16 @@ pub fn deinit() void {
     core.loop.deinit();
 }
 
+pub fn tick() void {
+    var buffer: [128]Event = undefined;
+
+    const len = core.events.pop(&buffer);
+
+    for (buffer[0..len]) |evt| {
+        log.debug("evt: {}", .{evt});
+    }
+}
+
 fn stopCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool {
     res catch unreachable;
 
