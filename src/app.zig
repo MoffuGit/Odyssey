@@ -129,8 +129,6 @@ pub fn openWindow(opts: win.Options) !void {
 }
 
 pub fn render() !void {
-    core.core.commands.push(.{ .id = app.frame });
-    core.core.wakeup.wake() catch {};
     var buffer: [128]core.Event = undefined;
 
     const read = core.core.events.pop(&buffer);
