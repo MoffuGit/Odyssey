@@ -26,7 +26,9 @@ const win = @import("window.zig");
 
 const log = std.log.scoped(.app);
 
-var app: struct {
+var app: App = undefined;
+
+const App = struct {
     io: Io,
     gpa: Allocator,
     arena: ArenaAllocator,
@@ -35,7 +37,7 @@ var app: struct {
     window_states: DoublyLinkedList(WindowState),
     collection: u64,
     frame: u64,
-} = undefined;
+};
 
 pub fn init(gpa: Allocator, io: Io) !void {
     app = .{
