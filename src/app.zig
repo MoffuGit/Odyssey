@@ -1,7 +1,3 @@
-// add cmds(application cmds), entity kind
-// caches(for our important data), evetns(events from the differents systems of the app)
-// we requiere as well to store the state of the app(views, animations, windows)
-
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
