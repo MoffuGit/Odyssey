@@ -18,9 +18,6 @@ const Display = @import("display.zig");
 const embedded = @import("embedded.zig");
 const font = @import("font.zig");
 const renderer = @import("renderer.zig");
-const type_id = @import("type_id.zig");
-const TypeId = type_id.TypeId;
-const TypeInfo = type_id.TypeInfo;
 const view = @import("view.zig");
 const win = @import("window.zig");
 
