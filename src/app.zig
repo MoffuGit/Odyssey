@@ -86,13 +86,13 @@ fn display() bool {
     while (win.popEvent()) |evt| {
         const window_state: *WindowState = @ptrCast(@alignCast(evt.win.userdata()));
 
-        switch (evt.type) {
+        switch (evt.data) {
             .window_update => |update| {
                 if (update.type == .window_close) {
                     window_state.closed = true;
                 }
             },
-            .mouse_button => window_state.view.pushEvent(evt.type),
+            .mouse_button => window_state.view.pushEvent(evt.data),
             else => {},
         }
     }

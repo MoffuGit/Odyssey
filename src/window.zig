@@ -43,7 +43,7 @@ pub fn poll() void {
     rgfw.RGFW_pollEvents();
 }
 
-pub fn setEventCallback(flag: EventKind, comptime function: *const fn (event: Event) void) void {
+pub fn setEventCallback(flag: EventType, comptime function: *const fn (event: Event) void) void {
     const TypeErased = struct {
         fn callback(raw_event: [*c]const rgfw.RGFW_event) callconv(.c) void {
             const event = Event.convert(raw_event.*);
@@ -191,7 +191,7 @@ pub const Window = window: {
     };
 };
 
-const EventKind = enum(u8) {
+const EventType = enum(u8) {
     none = rgfw.RGFW_eventNone,
     key_pressed = rgfw.RGFW_keyPressed,
     key_released = rgfw.RGFW_keyReleased,
@@ -223,7 +223,7 @@ fn activeMod(mod: rgfw.RGFW_keymod, flag: rgfw.RGFW_keymod) bool {
     return mod & flag != 0;
 }
 
-pub const EventType = union(enum) {
+pub const EventData = union(enum) {
     none,
     key: Key,
     key_char: u32,
@@ -242,12 +242,12 @@ pub const EventType = union(enum) {
 
 pub const Event = struct {
     win: Window,
-    type: EventType,
+    data: EventData,
 
     pub fn convert(ptr: rgfw.RGFW_event) Event {
         return .{
             .win = .{ .ptr = ptr.common.win },
-            .type = switch (@as(EventKind, @fromBackingInt(@intCast(ptr.type)))) {
+            .data = switch (@as(EventType, @fromBackingInt(@intCast(ptr.type)))) {
                 .none => .none,
                 .window_focus_in => .focus_in,
                 .window_focus_out => .focus_out,

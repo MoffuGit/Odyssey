@@ -19,12 +19,13 @@ const datastruct = @import("datastruct.zig");
 const heap = datastruct.heap;
 const queue = datastruct.queue;
 const SinglyLinkedList = datastruct.SinglyLinkedList;
-const scheduler = @import("scheduler.zig");
-const Task = scheduler.Task;
+const Scheduler = @import("scheduler.zig");
+const Task = Scheduler.Task;
 
 const log = std.log.scoped(.async);
 
 pub const Loop = struct {
+    scheduler: ?*Scheduler,
     kq: posix.fd_t,
     wakeup: Wakeup,
     time: Time,
@@ -38,7 +39,7 @@ pub const Loop = struct {
     stopped: bool,
     io: Io,
 
-    pub fn init(self: *Loop, io: Io) !void {
+    pub fn init(self: *Loop, io: Io, scheduler: ?*Scheduler) !void {
         const kq = posix.system.kqueue();
 
         switch (posix.errno(kq)) {
@@ -47,6 +48,7 @@ pub const Loop = struct {
         }
 
         self.* = .{
+            .scheduler = scheduler,
             .tasks = undefined,
             .wakeup = undefined,
             .io = io,
@@ -302,6 +304,7 @@ pub const Loop = struct {
 
         switch (completion.operation) {
             .read => {
+                const scheduler = self.scheduler orelse @panic("Comletion Requeires Scheduler");
                 completion.loop = self;
                 completion.task = .{
                     .callback = Completion.taskCallback,
@@ -862,7 +865,7 @@ test "mach port" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(io);
+    try loop.init(io, null);
     defer loop.deinit();
 
     const mach_self = posix.system.mach_task_self();
@@ -951,7 +954,7 @@ test "cancel mach port" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(io);
+    try loop.init(io, null);
     defer loop.deinit();
 
     const mach_self = posix.system.mach_task_self();
@@ -1046,7 +1049,7 @@ test "timer completes" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(io);
+    try loop.init(io, null);
     defer loop.deinit();
 
     const TimerTest = struct {
@@ -1078,7 +1081,7 @@ test "timer rearms when callback returns true" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(io);
+    try loop.init(io, null);
     defer loop.deinit();
 
     const TimerTest = struct {
@@ -1110,7 +1113,7 @@ test "cancel timer" {
     const io = testing.io;
 
     var loop: Loop = undefined;
-    try loop.init(io);
+    try loop.init(io, null);
     defer loop.deinit();
 
     const TimerTest = struct {
@@ -1174,11 +1177,12 @@ test "read completion" {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
 
+    var scheduler: Scheduler = undefined;
     try scheduler.init(arena.allocator(), io);
     defer scheduler.deinit();
 
     var loop: Loop = undefined;
-    try loop.init(io);
+    try loop.init(io, &scheduler);
     defer loop.deinit();
 
     var temp = std.testing.tmpDir(.{});
