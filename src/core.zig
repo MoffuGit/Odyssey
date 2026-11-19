@@ -10,7 +10,6 @@ const slotmap = datastruct.slotmap;
 const Slotmap = slotmap.SlotMap;
 const Key = slotmap.Key;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
-const Scheduler = @import("scheduler.zig");
 
 const log = std.log.scoped(.core);
 
@@ -30,7 +29,6 @@ pub const Core = struct {
     commands: queue.Spsc(Command),
 
     loop: async.Loop,
-    scheduler: Scheduler,
     store: Slotmap(Entity),
     future: Io.Future(void),
     root: *Entity,
@@ -49,14 +47,10 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .store = undefined,
         .root = undefined,
         .commands = undefined,
-        .scheduler = undefined,
         .events = undefined,
     };
 
-    try core.scheduler.init(gpa, io);
-    errdefer core.scheduler.deinit();
-
-    try core.loop.init(io, &core.scheduler);
+    try core.loop.init(io);
     errdefer core.loop.deinit();
 
     const arena = core.arena.allocator();
@@ -84,10 +78,6 @@ pub fn init(gpa: Allocator, io: Io) !void {
     core.future = try io.concurrent(run, .{});
 }
 
-pub fn run() void {
-    core.loop.run(.until_done) catch {};
-}
-
 pub fn deinit() void {
     core.stop.wake() catch {};
     core.future.await(core.io);
@@ -95,7 +85,10 @@ pub fn deinit() void {
     core.wakeup.deinit();
     core.arena.deinit();
     core.loop.deinit();
-    core.scheduler.deinit();
+}
+
+pub fn run() void {
+    core.loop.run(.until_done) catch {};
 }
 
 pub fn flush() void {

@@ -22,7 +22,7 @@ pub fn init(self: *Display, comptime function: *const fn () bool, io: Io) !void 
         .loop = undefined,
     };
 
-    try self.loop.init(io, null);
+    try self.loop.init(io);
     errdefer self.loop.deinit();
 
     const Callback = struct {
