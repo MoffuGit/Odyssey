@@ -29,7 +29,7 @@ pub const Core = struct {
     commands: queue.Spsc(Command),
 
     loop: async.Loop,
-    store: Slotmap(Entity),
+    entities: Slotmap(Entity),
     future: Io.Future(void),
     root: *Entity,
 };
@@ -44,7 +44,7 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .arena = .init(gpa),
         .loop = undefined,
         .future = undefined,
-        .store = undefined,
+        .entities = undefined,
         .root = undefined,
         .commands = undefined,
         .events = undefined,
@@ -59,15 +59,15 @@ pub fn init(gpa: Allocator, io: Io) !void {
     core.events = try .init(128, arena);
     core.commands = try .init(128, arena);
 
-    core.store = try .init(arena, 128);
+    core.entities = try .init(arena, 128);
 
-    const key = try core.store.reserve();
-    core.store.insert(key, .{
+    const key = try core.entities.reserve();
+    core.entities.insert(key, .{
         .key = key,
         .type = .root,
     });
 
-    core.root = core.store.get(key) orelse unreachable;
+    core.root = core.entities.get(key) orelse unreachable;
 
     core.wakeup = try core.loop.await(&core.wakeup_c, wakeupCallback);
     errdefer core.wakeup.deinit();
