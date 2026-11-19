@@ -82,8 +82,6 @@ pub fn run() !void {
 fn display() bool {
     if (app.window_states.is_empty()) app.display.stop();
 
-    const chunks = app.chunks.allocator();
-
     win.poll();
     while (win.popEvent()) |evt| {
         const window_state: *WindowState = @ptrCast(@alignCast(evt.win.userdata()));
@@ -91,9 +89,7 @@ fn display() bool {
         switch (evt.type) {
             .window_update => |update| {
                 if (update.type == .window_close) {
-                    window_state.deinit();
-                    app.window_states.remove(window_state);
-                    chunks.destroy(window_state);
+                    window_state.closed = true;
                 }
             },
             .mouse_button => window_state.view.pushEvent(evt.type),
@@ -129,10 +125,14 @@ pub fn openWindow(opts: win.Options) !void {
 }
 
 pub fn render() !void {
-    core.tick();
+    const chunks = app.chunks.allocator();
+
+    core.flush();
 
     var win_iter = app.window_states.iterator();
     while (win_iter.next()) |window_state| {
+        if (window_state.closed) continue;
+
         {
             view.begin(&window_state.view, window_state.win, window_state.resize, app.collection);
             defer view.finish();
@@ -261,6 +261,17 @@ pub fn render() !void {
 
             renderer.render(&window_state.handle, frame, window_state.resize);
         }
+
+        window_state.last_frame = app.frame;
+    }
+
+    win_iter = app.window_states.iterator();
+    while (win_iter.next()) |window_state| {
+        if (window_state.last_frame != app.frame) {
+            app.window_states.remove(window_state);
+            window_state.deinit();
+            chunks.destroy(window_state);
+        }
     }
 
     app.frame += 1;
@@ -274,9 +285,13 @@ pub const WindowState = struct {
     handle: renderer.Handle,
     view: view.View,
     resize: bool,
+    last_frame: u64,
+    closed: bool,
 
     pub fn init(self: *WindowState, opts: win.Options) !void {
         self.* = .{
+            .closed = false,
+            .last_frame = 0,
             .view = undefined,
             .win = undefined,
             .resize = false,

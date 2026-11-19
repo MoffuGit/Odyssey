@@ -91,7 +91,7 @@ pub fn deinit() void {
     core.loop.deinit();
 }
 
-pub fn tick() void {
+pub fn flush() void {
     var buffer: [128]Event = undefined;
 
     const len = core.events.pop(&buffer);
@@ -135,13 +135,14 @@ pub const Command = struct {
 
 pub const EntityKind = enum {
     root,
+    worktree,
 };
 
 pub const Entity = struct {
+    key: Key,
     kind: EntityKind,
     next: ?*Entity = null,
     prev: ?*Entity = null,
-    childrens: DoublyLinkedList(Entity) = .empty,
     parent: ?*Entity = null,
-    key: Key,
+    childrens: DoublyLinkedList(Entity) = .empty,
 };
