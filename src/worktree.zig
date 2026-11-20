@@ -10,12 +10,17 @@ const bench = @import("worktree/bench.zig");
 const scanner = @import("worktree/scanner.zig");
 const Snapshot = @import("worktree/snapshot.zig");
 
+/// Core's cached copy of a worktree the scanner published, resolved by the
+/// key of its entity. Read it with `core.worktree`.
 pub const Worktree = @This();
+
+pub const Context = Key.Context;
 
 key: Key,
 next: ?*Worktree = null,
 prev: ?*Worktree = null,
 
+/// The scanner generation `snapshot` and `status` were cloned at.
 generation: u64,
 status: scanner.Status,
 snapshot: Snapshot,

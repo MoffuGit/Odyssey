@@ -62,17 +62,21 @@ test "benchmark: Worktree initial scan" {
     for (0..durations.len) |idx| {
         bench.start(io);
 
-        const key = try core.openWorktree(chromium_path);
+        try core.pushCmd(.{ .open_worktree = chromium_path });
+
+        try core.flush();
+
+        const key = core.core.root.childrens.first.?.key;
 
         // Poll the core cache like a frame would: it clones the scanner's
         // state only when the scanner published a new generation.
         const worktree = while (true) {
-            core.flush();
+            try core.flush();
 
-            const worktree = (try core.worktree(key)).?;
+            const worktree = try core.worktree(key) orelse continue;
             if (worktree.status == .idle) break worktree;
 
-            try io.sleep(.fromMilliseconds(1), .awake);
+            try io.sleep(.fromMilliseconds(16), .awake);
         };
 
         durations[idx] = bench.stop(io);
@@ -81,8 +85,8 @@ test "benchmark: Worktree initial scan" {
             log.err("Verify err={}", .{err});
         };
 
-        try core.closeWorktree(key);
-        core.flush();
+        try core.pushCmd(.{ .close_worktree = key });
+        try core.flush();
     }
 
     const min = Bench.min(&durations);
