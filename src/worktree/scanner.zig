@@ -1,0 +1,617 @@
+const std = @import("std");
+const Io = std.Io;
+const atomic = std.atomic;
+const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
+const heap = std.heap;
+const Timestamp = Io.Timestamp;
+const builtin = @import("builtin");
+
+const GitIgnore = @import("zlob").GitIgnore;
+
+const chunk_pool = @import("../chunk_pool.zig");
+const ChunkAllocator = chunk_pool.ChunkAllocator;
+const ChunkedPath = @import("../chunked_path.zig");
+const RANGE_NODE_SIZE = ChunkedPath.RANGE_NODE_SIZE;
+const CHUNK_SIZE = ChunkedPath.CHUNKS_SIZE;
+const constants = @import("../constants.zig");
+const MAX_PATH_LEN = constants.MAX_PATH_LEN;
+const datastruct = @import("../datastruct.zig");
+const HashTable = datastruct.HashTable;
+const SinglyLinkedList = datastruct.SinglyLinkedList;
+const Key = datastruct.slotmap.Key;
+const scheduler = @import("../scheduler.zig");
+const Task = scheduler.Task;
+const attr = @import("attr.zig");
+const BulkAttr = attr.BulkAttr;
+const Snapshot = @import("snapshot.zig");
+
+const UPDATE_INTERVAL_IN_MS = if (builtin.mode == .debug) 2000 else 100;
+const log = std.log.scoped(.scanner);
+
+/// Walks and stores every open worktree. Core opens and closes worktrees from
+/// its loop thread. Scan tasks run on the scheduler and publish their progress
+/// by bumping the worktree's `generation`; readers compare it with the
+/// generation they hold and `clone` only when it changed.
+pub var scanner: Scanner = undefined;
+
+const Scanner = struct {
+    io: Io,
+    gpa: Allocator,
+    arena: heap.ArenaAllocator,
+
+    /// Guards `worktrees`.
+    mutex: Io.Mutex,
+    worktrees: HashTable(Key, Worktree, Key.Context),
+
+    /// Worktrees not destroyed yet, including closed ones whose tasks still run.
+    live: atomic.Value(u64),
+};
+
+pub const Status = enum {
+    scanning,
+    idle,
+};
+
+/// A worktree's published state, copied out of the scanner.
+pub const Published = struct {
+    generation: u64,
+    status: Status,
+    snapshot: Snapshot,
+};
+
+pub fn init(gpa: Allocator, io: Io) !void {
+    scanner = .{
+        .io = io,
+        .gpa = gpa,
+        .arena = .init(gpa),
+        .mutex = .init,
+        .worktrees = undefined,
+        .live = .init(0),
+    };
+    errdefer scanner.arena.deinit();
+
+    try scanner.worktrees.init(64, .{}, scanner.arena.allocator());
+}
+
+/// Closes every open worktree and waits for their tasks to finish. Core must
+/// be deinitialized and the scheduler still running.
+pub fn deinit() void {
+    {
+        scanner.mutex.lockUncancelable(scanner.io);
+        defer scanner.mutex.unlock(scanner.io);
+
+        var it = scanner.worktrees.iterator();
+        while (it.next()) |worktree| {
+            it.remove();
+            worktree.stop();
+        }
+    }
+
+    while (scanner.live.load(.acquire) != 0) {
+        scanner.io.sleep(.fromMilliseconds(1), .awake) catch {};
+    }
+
+    scanner.arena.deinit();
+}
+
+/// Starts scanning `abs_path` as the worktree of entity `key`. Runs on the
+/// core loop.
+pub fn open(key: Key, abs_path: []const u8) !void {
+    const worktree = try Worktree.create(key, abs_path);
+    errdefer worktree.release();
+
+    const chunks = worktree.chunks.threadSafeAllocator();
+
+    const task = try chunks.create(ScannerTask);
+    errdefer chunks.destroy(task);
+
+    task.* = .{
+        .worktree = worktree,
+        .kind = .initial_scan,
+        .task = .{ .callback = taskCallback },
+    };
+
+    {
+        scanner.mutex.lockUncancelable(scanner.io);
+        defer scanner.mutex.unlock(scanner.io);
+
+        scanner.worktrees.insert(key, worktree);
+    }
+    errdefer {
+        scanner.mutex.lockUncancelable(scanner.io);
+        defer scanner.mutex.unlock(scanner.io);
+
+        _ = scanner.worktrees.remove(key);
+    }
+
+    try worktree.pushTask(task);
+}
+
+/// Stops scanning the worktree of `key`. Its queued tasks finish without
+/// scanning, and the last one frees it. Runs on the core loop, after core
+/// dropped every copy of it.
+pub fn close(key: Key) void {
+    const worktree = worktree: {
+        scanner.mutex.lockUncancelable(scanner.io);
+        defer scanner.mutex.unlock(scanner.io);
+
+        break :worktree scanner.worktrees.remove(key) orelse return;
+    };
+
+    worktree.stop();
+}
+
+/// The generation the worktree of `key` last published, or null when it is
+/// not open.
+pub fn generation(key: Key) ?u64 {
+    scanner.mutex.lockUncancelable(scanner.io);
+    defer scanner.mutex.unlock(scanner.io);
+
+    const worktree = scanner.worktrees.get(key) orelse return null;
+
+    return worktree.generation.load(.acquire);
+}
+
+/// Copies the published state of the worktree of `key`, or returns null when
+/// it is not open.
+pub fn clone(key: Key, gpa: Allocator) !?Published {
+    scanner.mutex.lockUncancelable(scanner.io);
+    defer scanner.mutex.unlock(scanner.io);
+
+    const worktree = scanner.worktrees.get(key) orelse return null;
+
+    worktree.mutex.lockUncancelable(scanner.io);
+    defer worktree.mutex.unlock(scanner.io);
+
+    return .{
+        .generation = worktree.generation.load(.monotonic),
+        .status = worktree.status,
+        .snapshot = try worktree.snapshot.clone(gpa),
+    };
+}
+
+const Worktree = struct {
+    key: Key,
+    next: ?*Worktree = null,
+    prev: ?*Worktree = null,
+
+    arena: heap.ArenaAllocator,
+    chunks: ChunkAllocator,
+
+    /// Guards `snapshot` and `status`.
+    mutex: Io.Mutex,
+    snapshot: Snapshot,
+    status: Status,
+
+    /// Bumped under `mutex` each time the scanner publishes.
+    generation: atomic.Value(u64),
+
+    last_update: atomic.Value(i64),
+    task_count: atomic.Value(u64),
+    stopped: atomic.Value(bool),
+
+    /// One reference for the owner, released by `stop`, plus one per queued task.
+    /// The last release destroys the worktree.
+    refs: atomic.Value(u64),
+
+    scan_id: atomic.Value(u64),
+    completed_scan: u64,
+
+    fn create(key: Key, abs_path: []const u8) !*Worktree {
+        const gpa = scanner.gpa;
+        const io = scanner.io;
+
+        const self = try gpa.create(Worktree);
+        errdefer gpa.destroy(self);
+
+        self.* = .{
+            .key = key,
+            .arena = .init(gpa),
+            .chunks = undefined,
+            .mutex = .init,
+            .snapshot = undefined,
+            .status = .scanning,
+            .generation = .init(0),
+            .last_update = .init(Timestamp.now(io, .real).toMilliseconds()),
+            .task_count = .init(0),
+            .stopped = .init(false),
+            .refs = .init(1),
+            .scan_id = .init(0),
+            .completed_scan = 0,
+        };
+        errdefer self.arena.deinit();
+
+        try self.snapshot.init(abs_path, gpa, io);
+        errdefer self.snapshot.deinit();
+
+        try self.chunks.initThreadSafe(
+            self.arena.allocator(),
+            &.{
+                .{ .capacity = 1024 * 1024 * 1024, .chunk_size = RANGE_NODE_SIZE },
+                .{ .capacity = 1024 * 1024 * 1024, .chunk_size = CHUNK_SIZE },
+                .{ .capacity = 1024 * 1024 * 2, .chunk_size = @max(@sizeOf(EntryData), @sizeOf(ScannerTask)) },
+                .{ .capacity = 1024 * 1024, .chunk_size = @sizeOf(SharedFd) },
+            },
+            io,
+        );
+
+        _ = scanner.live.fetchAdd(1, .monotonic);
+
+        return self;
+    }
+
+    fn destroy(self: *Worktree) void {
+        self.snapshot.deinit();
+        self.arena.deinit();
+        scanner.gpa.destroy(self);
+
+        _ = scanner.live.fetchSub(1, .release);
+    }
+
+    fn stop(self: *Worktree) void {
+        self.stopped.store(true, .release);
+        self.release();
+    }
+
+    fn release(self: *Worktree) void {
+        if (self.refs.fetchSub(1, .acq_rel) != 1) return;
+        self.destroy();
+    }
+
+    /// Makes the current snapshot and `status` visible to readers.
+    fn publish(self: *Worktree, status: Status) void {
+        if (self.stopped.load(.acquire)) return;
+
+        self.mutex.lockUncancelable(scanner.io);
+        defer self.mutex.unlock(scanner.io);
+
+        self.status = status;
+        _ = self.generation.fetchAdd(1, .release);
+    }
+
+    fn pushTask(self: *Worktree, task: *ScannerTask) !void {
+        if (self.stopped.load(.acquire)) return error.Closed;
+
+        _ = self.refs.fetchAdd(1, .monotonic);
+        _ = self.task_count.fetchAdd(1, .release);
+        scheduler.push(&task.task) catch |err| {
+            _ = self.task_count.fetchSub(1, .release);
+            _ = self.refs.fetchSub(1, .monotonic);
+            return err;
+        };
+    }
+
+    fn taskDone(self: *Worktree, task: *ScannerTask) void {
+        defer self.release();
+
+        self.chunks.threadSafeAllocator().destroy(task);
+
+        const prev = self.task_count.fetchSub(1, .acq_rel);
+        if (prev != 1) return;
+
+        self.completed_scan = self.scan_id.load(.acquire);
+
+        self.publish(.idle);
+    }
+
+    fn initialScan(self: *Worktree) !void {
+        const io = scanner.io;
+        const chunks = self.chunks.threadSafeAllocator();
+
+        const stat = try Io.Dir.statFile(
+            .cwd(),
+            io,
+            self.snapshot.abs_root,
+            .{},
+        );
+
+        const path: ChunkedPath = .new(self.snapshot.root_name, 0, chunks);
+
+        {
+            self.mutex.lockUncancelable(io);
+            defer self.mutex.unlock(io);
+
+            self.snapshot.insert(
+                path,
+                .{
+                    .inode = stat.inode,
+                    .size = stat.size,
+                    .mtime = stat.mtime,
+                    .kind = stat.kind,
+                    .hidden = false,
+                    .ignored = false,
+                    .state = .pending,
+                },
+            );
+        }
+
+        if (stat.kind != .directory) return;
+
+        self.publish(.scanning);
+
+        const task = try chunks.create(ScannerTask);
+        errdefer chunks.destroy(task);
+
+        _ = self.scan_id.fetchAdd(1, .release);
+
+        task.* = .{
+            .worktree = self,
+            .kind = .{
+                .scan_dir = .{
+                    .path = path,
+                    .shared_fd = null,
+                    .ignore = null,
+                },
+            },
+            .task = .{ .callback = taskCallback },
+        };
+
+        try self.pushTask(task);
+    }
+
+    //we need to handle the git ignore stack,
+    //we are going to make an structure that let us make a git ignore
+    //stack for every given path, once we have that we can make the scan request
+    //path, the reasong why we need the ignore strucutr efirst is because at this point
+    //we would need to read/load the ignore files again, even if we do that on a prev
+    //scan, maybe we could use a hashmap and add an entry for every path that we know has a
+    //git ignore file
+    fn scanRequest(self: *Worktree, subscription: u64, path: ChunkedPath) !void {
+        //load any pending directory
+        //this would take every ancestor of the path,
+        //see if we aready have an entry for the ancestor
+        //and see if the entry kind is unloaded, if it is unloaded we would
+        //load the directory into the snapshot,
+        _ = subscription;
+        _ = path;
+        //push the scan id up
+        _ = self.scan_id.fetchAdd(1, .release);
+        //reload the paths
+        //this would load the new metadata for the path,
+        //if there is no metadata we would need to remove the entry
+        //and in the case of directories, remove every child of it(remove path)
+        //on the othe rhand, with the new metadata we would need to update
+        //the existing entry, one detail, this part should not trigger a re scan
+        //of the directories, the reason is because we are not currently handling events,
+        //any request is for a change made by the user, we know what happening with those
+        //changes
+
+        //send status update
+        self.publish(if (self.task_count.load(.acquire) > 0) .scanning else .idle);
+    }
+
+    fn scanDir(self: *Worktree, dir_path: ChunkedPath, shared_fd: ?*SharedFd, ignore: ?*const IgnoreNode) !void {
+        const io = scanner.io;
+        const chunks = self.chunks.threadSafeAllocator();
+        const arena = self.arena.allocator();
+        var buffer: [64 * 1024]u8 = undefined;
+        var tasks: SinglyLinkedList(Task) = .empty;
+        var count: u32 = 0;
+
+        defer if (shared_fd) |fd| fd.release(chunks, io);
+
+        const dir = bkl: {
+            if (shared_fd) |fd| {
+                const len = dir_path.basename(&buffer);
+                break :bkl try fd.dir.openDir(
+                    io,
+                    buffer[0..len],
+                    .{ .follow_symlinks = false, .iterate = true },
+                );
+            }
+
+            break :bkl try Io.Dir.cwd().openDir(
+                io,
+                self.snapshot.abs_root,
+                .{ .follow_symlinks = false, .iterate = true },
+            );
+        };
+        errdefer dir.close(io);
+
+        var effective_ignore: ?*const IgnoreNode = ignore;
+        {
+            const content = dir.readFile(io, ".gitignore", &buffer) catch null;
+
+            if (content) |src| {
+                const gi = try GitIgnore.parse(arena, src);
+                const node = try arena.create(IgnoreNode);
+                node.* = .{
+                    .parent = ignore,
+                    .gi = gi,
+                    .relative_offset = dir_path.len + 1,
+                };
+                effective_ignore = node;
+            }
+        }
+
+        var bulk = BulkAttr.init(dir.handle, &buffer, .{
+            .size = true,
+            .mtime = true,
+            .inode = true,
+        });
+
+        var suffix_buf: [MAX_PATH_LEN]u8 = undefined;
+        suffix_buf[0] = '/';
+        var path_buf: [MAX_PATH_LEN]u8 = undefined;
+
+        var entries: SinglyLinkedList(EntryData) = .empty;
+
+        while (try bulk.next()) |entry| {
+            const name = entry.name;
+            @memcpy(suffix_buf[1 .. 1 + name.len], name);
+            const suffix = suffix_buf[0 .. 1 + name.len];
+            const is_dir = entry.kind == .directory;
+            const is_hidden = name.len > 0 and name[0] == '.';
+
+            const path: ChunkedPath = .extend(&dir_path, suffix, 1, chunks);
+            const len = path.read(&path_buf);
+            const ignored = isIgnored(effective_ignore, path_buf[0..len], name, is_dir);
+
+            const data = chunks.create(EntryData) catch unreachable;
+            data.* = .{
+                .path = path,
+                .meta = .{
+                    .state = bkl: {
+                        if (entry.kind == .directory) {
+                            break :bkl if (is_hidden or ignored) .unloaded else .pending;
+                        } else break :bkl .loaded;
+                    },
+                    .inode = entry.meta.inode,
+                    .mtime = .fromNanoseconds(@intCast(entry.meta.mtime_ns)),
+                    .size = entry.meta.size,
+                    .kind = entry.kind,
+                    .hidden = is_hidden,
+                    .ignored = ignored,
+                },
+            };
+            entries.append(data);
+
+            if (is_dir and !(is_hidden or ignored)) {
+                const task = chunks.create(ScannerTask) catch unreachable;
+                task.* = .{
+                    .worktree = self,
+                    .task = .{ .callback = taskCallback },
+                    .kind = .{
+                        .scan_dir = .{
+                            .shared_fd = null,
+                            .path = path,
+                            .ignore = effective_ignore,
+                        },
+                    },
+                };
+
+                tasks.append(&task.task);
+                count += 1;
+            }
+        }
+
+        {
+            self.mutex.lockUncancelable(io);
+            defer self.mutex.unlock(io);
+
+            while (entries.pop()) |data| {
+                self.snapshot.insert(
+                    data.path,
+                    data.meta,
+                );
+                chunks.destroy(data);
+            }
+
+            const entry = self.snapshot.entries.get_mut(dir_path) orelse unreachable;
+            entry.meta.state = .loaded;
+        }
+
+        if (count > 0) {
+            const shared = try chunks.create(SharedFd);
+            shared.* = .{
+                .dir = dir,
+                .refs = .init(count),
+            };
+
+            while (tasks.pop()) |t| {
+                const task: *ScannerTask = @fieldParentPtr("task", t);
+                task.kind.scan_dir.shared_fd = shared;
+
+                try self.pushTask(task);
+            }
+        } else {
+            dir.close(io);
+        }
+
+        const now = Timestamp.now(io, .real).toMilliseconds();
+        const last = self.last_update.load(.acquire);
+
+        if (now - last >= UPDATE_INTERVAL_IN_MS) {
+            if (self.last_update.cmpxchgWeak(last, now, .acq_rel, .monotonic) == null) {
+                self.publish(.scanning);
+            }
+        }
+    }
+};
+
+const ScannerTask = struct {
+    worktree: *Worktree,
+    kind: union(enum) {
+        initial_scan,
+        scan_dir: struct {
+            path: ChunkedPath,
+            shared_fd: ?*SharedFd,
+            ignore: ?*const IgnoreNode,
+        },
+        scan_request: struct {
+            subscription: u6,
+            path: ChunkedPath,
+        },
+    },
+    task: Task,
+};
+
+fn taskCallback(task: *Task) void {
+    const t: *ScannerTask = @fieldParentPtr("task", task);
+
+    const worktree = t.worktree;
+    defer worktree.taskDone(t);
+
+    if (worktree.stopped.load(.acquire)) return;
+
+    const result = switch (t.kind) {
+        .initial_scan => worktree.initialScan(),
+        .scan_dir => |dir| worktree.scanDir(dir.path, dir.shared_fd, dir.ignore),
+        .scan_request => |request| worktree.scanRequest(request.subscription, request.path),
+    };
+
+    result catch |err| switch (err) {
+        error.Closed => {},
+        else => log.err("Scanner err={}", .{err}),
+    };
+}
+
+const IgnoreNode = struct {
+    gi: GitIgnore,
+    relative_offset: u32,
+
+    parent: ?*const IgnoreNode,
+};
+
+fn isIgnored(
+    start: ?*const IgnoreNode,
+    path: []const u8,
+    basename: []const u8,
+    is_dir: bool,
+) bool {
+    var node = start;
+    while (node) |n| : (node = n.parent) {
+        if (n.gi.is_empty) continue;
+
+        if (n.gi.checkWithBasename(
+            path[n.relative_offset..],
+            basename,
+            is_dir,
+        )) |verdict| {
+            return verdict;
+        }
+    }
+    return false;
+}
+
+const EntryData = struct {
+    path: ChunkedPath,
+    meta: Snapshot.Meta,
+    next: ?*EntryData = null,
+};
+
+const SharedFd = struct {
+    dir: Io.Dir,
+    refs: atomic.Value(u32),
+
+    fn release(self: *SharedFd, alloc: Allocator, io: Io) void {
+        const prev = self.refs.fetchSub(1, .acq_rel);
+
+        assert(prev != 0);
+        if (prev == 1) {
+            self.dir.close(io);
+            alloc.destroy(self);
+        }
+    }
+};

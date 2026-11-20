@@ -42,6 +42,10 @@
             .url = "https://deps.files.ghostty.org/zig_objc-3352c12a868f8787ab71bf2ca6eab9fcfb635c52.tar.gz",
             .hash = "zig_objc-0.0.0-Ir_Sp_4tAQDXtPi51nW_jD9LOEzBvU9lofwO9Pzi6IB4",
         },
+        .zlob = .{
+            .url = "git+https://github.com/dmtrKovalenko/zlob.git#50335fe9600b196441e846df5c3fa545dce0633d",
+            .hash = "zlob-1.8.2-zzE2ld9UDAB0WUnLaVtOcnSw9L8bhC5kYFdsOrRkCSt7",
+        },
         .translate_c = .{
             .url = "git+https://codeberg.org/ziglang/translate-c?ref=zig-0.17.x#cfac21f3199b2b02ce3fd7db652aa456421fe4ab",
             .hash = "translate_c-2.0.2-Q_BUWvBNBwDnyehSiuAJmdFcMYHYGA-Jc3KiYdrV2Dqx",

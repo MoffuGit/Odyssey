@@ -36,6 +36,17 @@ pub const Key = packed struct {
     pub fn eql(self: @This(), other: @This()) bool {
         return self.index == other.index and self.generation == other.generation;
     }
+
+    /// HashTable context for values that store their `key`.
+    pub const Context = struct {
+        pub fn hash(_: Context, key: Key) u64 {
+            return key.index;
+        }
+
+        pub fn eql(_: Context, key: Key, value: anytype) bool {
+            return key.eql(value.key);
+        }
+    };
 };
 
 pub fn SlotMap(Value: type) type {

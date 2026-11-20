@@ -44,6 +44,12 @@ pub fn HashTable(
             list.append(value);
         }
 
+        pub fn remove(self: *@This(), key: K) ?*V {
+            const value = self.get(key) orelse return null;
+            self.slots[self.ctx.hash(key) % self.slots.len].remove(value);
+            return value;
+        }
+
         pub fn deinit(self: *@This(), alloc: Allocator) void {
             alloc.free(self.slots);
         }

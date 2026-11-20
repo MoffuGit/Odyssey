@@ -80,7 +80,7 @@ pub const View = struct {
         self.arena.deinit();
     }
 
-    pub fn pushEvent(self: *View, @"type": win.EventData) void {
+    pub fn pushEvent(self: *View, @"type": win.Data) void {
         const chunks = self.frameChunks();
 
         const event = chunks.create(Event) catch @panic("Chunk Overflow");
@@ -527,7 +527,7 @@ pub fn button(str: []const u8) Signal {
 const Event = struct {
     next: ?*Event = null,
     prev: ?*Event = null,
-    type: win.EventData,
+    type: win.Data,
 };
 
 pub const Attribute = union(enum) {

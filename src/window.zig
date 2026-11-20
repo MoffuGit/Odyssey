@@ -223,7 +223,7 @@ fn activeMod(mod: rgfw.RGFW_keymod, flag: rgfw.RGFW_keymod) bool {
     return mod & flag != 0;
 }
 
-pub const EventData = union(enum) {
+pub const Data = union(enum) {
     none,
     key: Key,
     key_char: u32,
@@ -242,7 +242,7 @@ pub const EventData = union(enum) {
 
 pub const Event = struct {
     win: Window,
-    data: EventData,
+    data: Data,
 
     pub fn convert(ptr: rgfw.RGFW_event) Event {
         return .{

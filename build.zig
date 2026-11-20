@@ -51,6 +51,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const zlob = b.dependency("zlob", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -63,6 +68,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "true_type", .module = true_type.module("TrueType") },
             .{ .name = "rgfw", .module = rgfw },
             .{ .name = "kb_text", .module = kb_text },
+            .{ .name = "zlob", .module = zlob.module("zlob_core") },
         },
     });
 

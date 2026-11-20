@@ -14,8 +14,10 @@ const async = @import("async.zig");
 const patch = @import("patch.zig");
 const renderer = @import("renderer.zig");
 const scheduler = @import("scheduler.zig");
+const scanner = @import("worktree/scanner.zig");
 const view = @import("view.zig");
 const win = @import("window.zig");
+const Worktree = @import("worktree.zig");
 
 pub const std_options: std.Options = .{
     .logFn = global.logFn,
@@ -30,6 +32,9 @@ pub fn main(init: std.process.Init) !void {
 
     try scheduler.init(gpa, io);
     defer scheduler.deinit();
+
+    try scanner.init(gpa, io);
+    defer scanner.deinit();
 
     try core.init(gpa, io);
     defer core.deinit();
@@ -70,4 +75,5 @@ test {
     _ = ChunkedPath;
     _ = datastruct;
     _ = async;
+    _ = Worktree;
 }
