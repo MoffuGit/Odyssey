@@ -178,12 +178,12 @@ pub const FrameState = struct {
     uniform_buffer: Buffer,
 
     atlas_texture: Texture,
-    atlas_gen: usize,
+    atlas_generation: usize,
 
     pub fn init(self: *FrameState, gpa: Allocator) !void {
         self.* = .{
             .atlas_texture = undefined,
-            .atlas_gen = 0,
+            .atlas_generation = 0,
             .uniform_buffer = undefined,
             .arena = .init(gpa),
             .uniforms = undefined,

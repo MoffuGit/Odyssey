@@ -7,8 +7,6 @@ pub fn init() !void {
     cpu_count = try std.Thread.getCpuCount();
 }
 
-pub fn deinit() void {}
-
 pub fn logFn(
     comptime level: std.log.Level,
     comptime scope: @EnumLiteral(),

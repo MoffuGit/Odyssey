@@ -124,7 +124,7 @@ pub fn openWindow(opts: win.Options) !void {
 pub fn render() !void {
     const chunks = app.chunks.allocator();
 
-    core.flush();
+    try core.flush();
 
     var win_iter = app.window_states.iterator();
     while (win_iter.next()) |window_state| {
@@ -180,7 +180,7 @@ pub fn render() !void {
                 .viewport_size = try window_state.win.size(),
             };
 
-            if (frame.atlas_gen != font.cache.atlas_gen) {
+            if (frame.atlas_generation != font.cache.atlas_gen) {
                 try frame.syncAtlas(&font.cache.atlas);
             }
 

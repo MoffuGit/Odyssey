@@ -1,9 +1,5 @@
-//SOURCE: https://github.com/dmtrKovalenko/zlob/tree/main
-//LICENSE: [ZLOB]
-
 const std = @import("std");
-const Io = std.Io;
-const File = Io.File;
+const File = std.Io.File;
 const builtin = @import("builtin");
 
 pub const supported = builtin.os.tag == .macos and builtin.link_libc;

@@ -44,7 +44,7 @@ pub fn init(self: *Display, comptime function: *const fn () bool, io: Io) !void 
         struct {
             fn callback(_: *macos.video.DisplayLink, ud: ?*async.Waker) void {
                 if (ud) |waker| {
-                    waker.wake() catch {};
+                    waker.wake() catch unreachable;
                 }
             }
         }.callback,

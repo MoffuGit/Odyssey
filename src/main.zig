@@ -14,7 +14,7 @@ const async = @import("async.zig");
 const patch = @import("patch.zig");
 const renderer = @import("renderer.zig");
 const scheduler = @import("scheduler.zig");
-const scanner = @import("worktree/scanner.zig");
+const scanner = @import("scanner.zig");
 const view = @import("view.zig");
 const win = @import("window.zig");
 const Worktree = @import("worktree.zig");
@@ -28,16 +28,15 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
     try global.init();
-    defer global.deinit();
 
     try scheduler.init(gpa, io);
     defer scheduler.deinit();
 
-    try scanner.init(gpa, io);
-    defer scanner.deinit();
-
     try core.init(gpa, io);
     defer core.deinit();
+
+    try scanner.init(gpa, io);
+    defer scanner.deinit();
 
     try renderer.init();
     defer renderer.deinit();

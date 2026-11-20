@@ -9,30 +9,28 @@ const builtin = @import("builtin");
 
 const GitIgnore = @import("zlob").GitIgnore;
 
-const chunk_pool = @import("../chunk_pool.zig");
-const ChunkAllocator = chunk_pool.ChunkAllocator;
-const ChunkedPath = @import("../chunked_path.zig");
-const RANGE_NODE_SIZE = ChunkedPath.RANGE_NODE_SIZE;
-const CHUNK_SIZE = ChunkedPath.CHUNKS_SIZE;
-const constants = @import("../constants.zig");
-const MAX_PATH_LEN = constants.MAX_PATH_LEN;
-const datastruct = @import("../datastruct.zig");
-const HashTable = datastruct.HashTable;
-const SinglyLinkedList = datastruct.SinglyLinkedList;
-const Key = datastruct.slotmap.Key;
-const scheduler = @import("../scheduler.zig");
-const Task = scheduler.Task;
+const async = @import("async.zig");
 const attr = @import("attr.zig");
 const BulkAttr = attr.BulkAttr;
-const Snapshot = @import("snapshot.zig");
+const chunk_pool = @import("chunk_pool.zig");
+const ChunkAllocator = chunk_pool.ChunkAllocator;
+const ChunkedPath = @import("chunked_path.zig");
+const RANGE_NODE_SIZE = ChunkedPath.RANGE_NODE_SIZE;
+const CHUNK_SIZE = ChunkedPath.CHUNKS_SIZE;
+const constants = @import("constants.zig");
+const MAX_PATH_LEN = constants.MAX_PATH_LEN;
+const datastruct = @import("datastruct.zig");
+const HashTable = datastruct.HashTable;
+const btree = datastruct.btree;
+const SinglyLinkedList = datastruct.SinglyLinkedList;
+const Key = datastruct.slotmap.Key;
+const scheduler = @import("scheduler.zig");
+const Task = scheduler.Task;
 
 const UPDATE_INTERVAL_IN_MS = if (builtin.mode == .debug) 2000 else 100;
+
 const log = std.log.scoped(.scanner);
 
-/// Walks and stores every open worktree. Core opens and closes worktrees from
-/// its loop thread. Scan tasks run on the scheduler and publish their progress
-/// by bumping the worktree's `generation`; readers compare it with the
-/// generation they hold and `clone` only when it changed.
 pub var scanner: Scanner = undefined;
 
 const Scanner = struct {
@@ -40,24 +38,8 @@ const Scanner = struct {
     gpa: Allocator,
     arena: heap.ArenaAllocator,
 
-    /// Guards `worktrees`.
-    mutex: Io.Mutex,
     worktrees: HashTable(Key, Worktree, Key.Context),
-
-    /// Worktrees not destroyed yet, including closed ones whose tasks still run.
     live: atomic.Value(u64),
-};
-
-pub const Status = enum {
-    scanning,
-    idle,
-};
-
-/// A worktree's published state, copied out of the scanner.
-pub const Published = struct {
-    generation: u64,
-    status: Status,
-    snapshot: Snapshot,
 };
 
 pub fn init(gpa: Allocator, io: Io) !void {
@@ -65,7 +47,6 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .io = io,
         .gpa = gpa,
         .arena = .init(gpa),
-        .mutex = .init,
         .worktrees = undefined,
         .live = .init(0),
     };
@@ -74,18 +55,11 @@ pub fn init(gpa: Allocator, io: Io) !void {
     try scanner.worktrees.init(64, .{}, scanner.arena.allocator());
 }
 
-/// Closes every open worktree and waits for their tasks to finish. Core must
-/// be deinitialized and the scheduler still running.
 pub fn deinit() void {
-    {
-        scanner.mutex.lockUncancelable(scanner.io);
-        defer scanner.mutex.unlock(scanner.io);
-
-        var it = scanner.worktrees.iterator();
-        while (it.next()) |worktree| {
-            it.remove();
-            worktree.stop();
-        }
+    var it = scanner.worktrees.iterator();
+    while (it.next()) |worktree| {
+        it.remove();
+        worktree.stop();
     }
 
     while (scanner.live.load(.acquire) != 0) {
@@ -95,8 +69,6 @@ pub fn deinit() void {
     scanner.arena.deinit();
 }
 
-/// Starts scanning `abs_path` as the worktree of entity `key`. Runs on the
-/// core loop.
 pub fn open(key: Key, abs_path: []const u8) !void {
     const worktree = try Worktree.create(key, abs_path);
     errdefer worktree.release();
@@ -112,64 +84,122 @@ pub fn open(key: Key, abs_path: []const u8) !void {
         .task = .{ .callback = taskCallback },
     };
 
-    {
-        scanner.mutex.lockUncancelable(scanner.io);
-        defer scanner.mutex.unlock(scanner.io);
-
-        scanner.worktrees.insert(key, worktree);
-    }
-    errdefer {
-        scanner.mutex.lockUncancelable(scanner.io);
-        defer scanner.mutex.unlock(scanner.io);
-
-        _ = scanner.worktrees.remove(key);
-    }
+    scanner.worktrees.insert(key, worktree);
+    _ = scanner.worktrees.remove(key);
 
     try worktree.pushTask(task);
 }
-
-/// Stops scanning the worktree of `key`. Its queued tasks finish without
-/// scanning, and the last one frees it. Runs on the core loop, after core
-/// dropped every copy of it.
 pub fn close(key: Key) void {
-    const worktree = worktree: {
-        scanner.mutex.lockUncancelable(scanner.io);
-        defer scanner.mutex.unlock(scanner.io);
-
-        break :worktree scanner.worktrees.remove(key) orelse return;
-    };
+    const worktree = scanner.worktrees.remove(key) orelse return;
 
     worktree.stop();
 }
 
-/// The generation the worktree of `key` last published, or null when it is
-/// not open.
-pub fn generation(key: Key) ?u64 {
-    scanner.mutex.lockUncancelable(scanner.io);
-    defer scanner.mutex.unlock(scanner.io);
+pub const Status = enum {
+    scanning,
+    idle,
+};
 
-    const worktree = scanner.worktrees.get(key) orelse return null;
+pub const Snapshot = struct {
+    arena: heap.ArenaAllocator,
+    chunks: ChunkAllocator,
 
-    return worktree.generation.load(.acquire);
-}
+    entries: Entries,
 
-/// Copies the published state of the worktree of `key`, or returns null when
-/// it is not open.
-pub fn clone(key: Key, gpa: Allocator) !?Published {
-    scanner.mutex.lockUncancelable(scanner.io);
-    defer scanner.mutex.unlock(scanner.io);
+    abs_root: []u8,
+    root_name: []u8,
 
-    const worktree = scanner.worktrees.get(key) orelse return null;
+    next_entry_id: atomic.Value(u64),
 
-    worktree.mutex.lockUncancelable(scanner.io);
-    defer worktree.mutex.unlock(scanner.io);
+    pub fn init(
+        self: *Snapshot,
+        abs_path: []const u8,
+        gpa: Allocator,
+    ) !void {
+        self.* = .{
+            .arena = .init(gpa),
+            .chunks = undefined,
+            .abs_root = undefined,
+            .root_name = undefined,
+            .entries = undefined,
+            .next_entry_id = .init(0),
+        };
 
-    return .{
-        .generation = worktree.generation.load(.monotonic),
-        .status = worktree.status,
-        .snapshot = try worktree.snapshot.clone(gpa),
+        const arena = self.arena.allocator();
+        errdefer self.arena.deinit();
+
+        self.abs_root = try arena.dupe(u8, abs_path);
+        self.root_name = try arena.dupe(u8, std.fs.path.basename(self.abs_root));
+
+        try self.chunks.init(arena, &.{
+            .{ .capacity = 1024 * 1024, .chunk_size = NODE_SIZE },
+        });
+
+        try self.entries.init(self.chunks.allocator());
+    }
+
+    pub fn insert(self: *Snapshot, path: ChunkedPath, meta: Meta) void {
+        _ = self.entries.insert(self.chunks.allocator(), path, .{
+            .path = path,
+            .meta = meta,
+            .id = self.next_entry_id.fetchAdd(1, .monotonic),
+        }) catch @panic("Snapshot Nodes Overflow");
+    }
+
+    pub fn clone(self: *const Snapshot, gpa: Allocator) !Snapshot {
+        var copy: Snapshot = .{
+            .arena = .init(gpa),
+            .chunks = undefined,
+            .entries = undefined,
+            .abs_root = undefined,
+            .root_name = undefined,
+            .next_entry_id = .init(self.next_entry_id.load(.monotonic)),
+        };
+        errdefer copy.arena.deinit();
+        const arena = copy.arena.allocator();
+
+        copy.abs_root = try arena.dupe(u8, self.abs_root);
+        copy.root_name = try arena.dupe(u8, self.root_name);
+
+        try copy.chunks.init(arena, &.{
+            .{ .capacity = 1024 * 1024, .chunk_size = NODE_SIZE },
+        });
+        copy.entries = try self.entries.clone(copy.chunks.allocator());
+
+        return copy;
+    }
+
+    pub fn deinit(self: *Snapshot) void {
+        self.arena.deinit();
+    }
+
+    const Entries = btree.BPlusTree(ChunkedPath, Entry, cmpPath);
+    pub const NODE_SIZE = Entries.NODE_SIZE;
+
+    fn cmpPath(a: ChunkedPath, b: ChunkedPath) std.math.Order {
+        return a.cmp(&b);
+    }
+
+    pub const Entry = struct {
+        id: u64,
+        path: ChunkedPath,
+        meta: Meta,
     };
-}
+
+    pub const Meta = struct {
+        mtime: Io.Timestamp,
+        size: u64,
+        inode: u64,
+        kind: Io.File.Kind,
+        hidden: bool,
+        ignored: bool,
+        state: enum {
+            loaded,
+            pending,
+            unloaded,
+        },
+    };
+};
 
 const Worktree = struct {
     key: Key,
@@ -177,22 +207,17 @@ const Worktree = struct {
     prev: ?*Worktree = null,
 
     arena: heap.ArenaAllocator,
-    chunks: ChunkAllocator,
 
-    /// Guards `snapshot` and `status`.
     mutex: Io.Mutex,
     snapshot: Snapshot,
     status: Status,
 
-    /// Bumped under `mutex` each time the scanner publishes.
     generation: atomic.Value(u64),
 
     last_update: atomic.Value(i64),
     task_count: atomic.Value(u64),
     stopped: atomic.Value(bool),
 
-    /// One reference for the owner, released by `stop`, plus one per queued task.
-    /// The last release destroys the worktree.
     refs: atomic.Value(u64),
 
     scan_id: atomic.Value(u64),
