@@ -84,8 +84,7 @@ pub fn deinit() void {
 
     var it = scanner.worktrees.iterator();
     while (it.next()) |worktree| {
-        it.remove();
-        worktree.destroy();
+        worktree.deinit();
     }
 
     scanner.waker.deinit();
@@ -94,13 +93,15 @@ pub fn deinit() void {
 
 fn wakeupCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool {
     res catch unreachable;
+    const chunks = scanner.chunks.allocator();
 
     var it = scanner.worktrees.iterator();
     while (it.next()) |worktree| {
         if (worktree.stopped.load(.acquire)) {
             if (worktree.task_count.load(.acquire) == 0) {
                 it.remove();
-                worktree.destroy();
+                worktree.deinit();
+                chunks.destroy(worktree);
             }
             continue;
         }
@@ -124,21 +125,11 @@ fn wakeupCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool
 }
 
 pub fn open(key: Key, abs_path: []const u8) !void {
-    const worktree = try Worktree.create(key, abs_path);
-    errdefer worktree.destroy();
+    const chunks = scanner.chunks.allocator();
+    const worktree = try chunks.create(Worktree);
+    errdefer chunks.destroy(worktree);
 
-    const chunks = worktree.chunks.threadSafeAllocator();
-
-    const task = try chunks.create(ScannerTask);
-    errdefer chunks.destroy(task);
-
-    task.* = .{
-        .worktree = worktree,
-        .kind = .initial_scan,
-        .task = .{ .callback = taskCallback },
-    };
-
-    try worktree.pushTask(task);
+    try worktree.init(key, abs_path);
 
     scanner.worktrees.insert(key, worktree);
 }
@@ -274,13 +265,9 @@ const Worktree = struct {
     task_count: atomic.Value(u64),
     stopped: atomic.Value(bool),
 
-    fn create(key: Key, abs_path: []const u8) !*Worktree {
+    fn init(self: *Worktree, key: Key, abs_path: []const u8) !void {
         const gpa = scanner.gpa;
         const io = scanner.io;
-        const chunks = scanner.chunks.allocator();
-
-        const self = try chunks.create(Worktree);
-        errdefer chunks.destroy(self);
 
         self.* = .{
             .last_generation = 0,
@@ -311,15 +298,25 @@ const Worktree = struct {
             io,
         );
 
-        return self;
+        const chunks = self.chunks.threadSafeAllocator();
+
+        const task = try chunks.create(ScannerTask);
+        errdefer chunks.destroy(task);
+
+        task.* = .{
+            .worktree = self,
+            .kind = .initial_scan,
+            .task = .{ .callback = taskCallback },
+        };
+
+        try self.pushTask(task);
     }
 
-    fn destroy(self: *Worktree) void {
+    fn deinit(self: *Worktree) void {
         assert(self.task_count.load(.acquire) == 0);
 
         self.snapshot.deinit();
         self.arena.deinit();
-        scanner.chunks.allocator().destroy(self);
     }
 
     fn stop(self: *Worktree) void {
