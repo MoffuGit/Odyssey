@@ -89,7 +89,9 @@ pub fn build(b: *std.Build) void {
         .filters = test_filters,
     });
 
-    b.step("test", "Run tests").dependOn(&b.addRunArtifact(exe_tests).step);
+    const run_tests = b.addRunArtifact(exe_tests);
+    if (benchmark) run_tests.stdio = .inherit;
+    b.step("test", "Run tests").dependOn(&run_tests.step);
 
     const metallib = MetallibStep.create(b, .{
         .name = "Odyssey",
