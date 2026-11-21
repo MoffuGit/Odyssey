@@ -11,11 +11,11 @@ const datastruct = @import("datastruct.zig");
 const font = @import("font.zig");
 const global = @import("global.zig");
 const patch = @import("patch.zig");
+const Properties = @import("properties.zig");
 const renderer = @import("renderer.zig");
 const scheduler = @import("scheduler.zig");
 const view = @import("view.zig");
 const win = @import("window.zig");
-const Worktree = @import("worktree.zig");
 
 pub const std_options: std.Options = .{
     .logFn = global.logFn,
@@ -67,5 +67,5 @@ test {
     _ = ChunkedPath;
     _ = datastruct;
     _ = async;
-    _ = Worktree;
+    _ = Properties;
 }

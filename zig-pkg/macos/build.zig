@@ -132,8 +132,8 @@ pub fn build(b: *std.Build) !void {
         }
         test_exe.root_module.linkLibrary(lib);
 
-        var it = module.import_table.iterator();
-        while (it.next()) |entry| {
+        var iter = module.import_table.iterator();
+        while (iter.next()) |entry| {
             test_exe.root_module.addImport(
                 entry.key_ptr.*,
                 entry.value_ptr.*,
