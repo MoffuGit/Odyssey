@@ -298,19 +298,9 @@ pub fn fmt(comptime format: []const u8, args: anytype) ![]u8 {
     return std.fmt.bufPrint(buffer, format, args) catch unreachable;
 }
 
-pub fn blkStr(str: []const u8, flags: Block.Flags) *Block {
-    const key = keyFromString(getSeed(), str);
-
-    const block = blk(.{ .flags = flags, .key = key });
-
-    if (block.flags.text) setDisplayString(block, str);
-
-    return block;
-}
-
 const Options = struct {
     flags: Block.Flags = .{},
-    key: ?u64 = null,
+    str: ?[]const u8 = null,
 };
 
 pub fn blk(options: Options) *Block {
@@ -318,7 +308,8 @@ pub fn blk(options: Options) *Block {
     const chunks = local.chunks.allocator();
 
     const cached = bkl: {
-        const key = options.key orelse break :bkl null;
+        const str = options.str orelse break :bkl null;
+        const key = keyFromString(getSeed(), str) orelse break :bkl null;
 
         if (local.cache.get(key)) |c| {
             const block: *Block = @fieldParentPtr("cached", c);
@@ -350,6 +341,10 @@ pub fn blk(options: Options) *Block {
     block.build(local, options.flags);
 
     blkComplete(block);
+
+    if (options.str) |str| {
+        if (block.flags.text) setDisplayString(block, str);
+    }
 
     return block;
 }
@@ -518,7 +513,13 @@ pub fn spacer(sizing: Sizing, factor: f32) void {
 }
 
 pub fn button(str: []const u8) Signal {
-    const block = blkStr(str, .{ .mouse = true, .text = true });
+    const block = blk(.{
+        .str = str,
+        .flags = .{
+            .mouse = true,
+            .text = true,
+        },
+    });
     blkEnd();
 
     return signal(block);

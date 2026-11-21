@@ -145,10 +145,10 @@ pub fn render() !void {
                 view.textColor(.{ 1.0, 1.0, 1.0, 1.0 });
                 view.textAlign(.right);
 
-                _ = view.blkStr(
-                    "zig build run@@@green",
-                    .{ .text = true },
-                );
+                _ = view.blk(.{
+                    .str = "zig build run@@@green",
+                    .flags = .{ .text = true },
+                });
                 defer view.blkEnd();
 
                 view.col();
