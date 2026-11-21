@@ -18,10 +18,13 @@ pub fn init(self: *Properties, alloc: Allocator) !void {
         .root = undefined,
     };
 
-    try self.chunks.init(alloc, &.{.{ .capacity = 128, .chunk_size = 8 }});
+    try self.chunks.init(alloc, &.{
+        .{ .capacity = 128, .chunk_size = 8 },
+        .{ .capacity = 128, .chunk_size = @sizeOf(Property) },
+    });
     errdefer self.chunks.deinit(alloc);
 
-    self.root = self.create(null, "root");
+    self.root = try self.create("root");
 }
 
 pub fn deinit(self: *Properties, alloc: Allocator) void {
@@ -80,6 +83,6 @@ test "Property tree" {
     const gpa = testing.allocator;
 
     var properties: Properties = undefined;
-    properties.init(gpa);
+    try properties.init(gpa);
     defer properties.deinit(gpa);
 }
