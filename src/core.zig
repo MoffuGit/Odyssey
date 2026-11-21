@@ -5,6 +5,8 @@ const Io = std.Io;
 const testing = std.testing;
 
 const async = @import("async.zig");
+const global = @import("global.zig");
+const Bench = @import("bench.zig");
 const chunk_pool = @import("chunk_pool.zig");
 const ChunkAllocator = chunk_pool.ChunkAllocator;
 const datastruct = @import("datastruct.zig");
@@ -394,9 +396,10 @@ pub const WorktreeCache = struct {
 };
 
 test "Worktree" {
+    const chromium_path = @import("test_options").chromium_path;
+
     const gpa = testing.allocator;
     const io = testing.io;
-    const chromium_path = @import("test_options").chromium_path;
 
     try init(gpa, io);
     defer deinit();
@@ -417,4 +420,63 @@ test "Worktree" {
     try flush();
 
     try testing.expect(worktree(key) == null);
+}
+
+test "benchmark: Worktree initial scan" {
+    const chromium_path = @import("test_options").chromium_path;
+
+    if (Bench.mode == .smoke) return;
+
+    try global.init();
+
+    const gpa = std.heap.c_allocator;
+    var threaded: std.Io.Threaded = .init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    try init(gpa, io);
+    defer deinit();
+
+    var bench: Bench = .init();
+    defer bench.deinit();
+
+    Bench.report("path={s}", .{chromium_path});
+
+    var durations: [8]Io.Duration = undefined;
+
+    for (0..durations.len) |idx| {
+        bench.start(io);
+
+        try pushCmd(.{ .open_worktree = chromium_path });
+        try flush();
+
+        const key = core.root.childrens.first.?.key;
+
+        while (true) {
+            try flush();
+            const cached = worktree(key);
+            if (cached) |w| std.mem.doNotOptimizeAway(w.snapshot.entries.count);
+
+            if (cached) |w| if (w.status == .idle) break;
+
+            try io.sleep(.fromMilliseconds(16), .awake);
+        }
+
+        durations[idx] = bench.stop(io);
+
+        try pushCmd(.{ .close_worktree = key });
+        try flush();
+    }
+
+    const mean = Bench.mean(&durations);
+    const min = Bench.min(&durations);
+    const max = Bench.max(&durations);
+    Bench.report(
+        "scan(min={}ms mean={}ms max={}ms)",
+        .{
+            min.toMilliseconds(),
+            mean.toMilliseconds(),
+            max.toMilliseconds(),
+        },
+    );
 }
