@@ -245,7 +245,6 @@ const Worktree = struct {
     mutex: Io.Mutex,
     snapshot: Snapshot,
     status: Status,
-
     generation: u64,
 
     last_update: atomic.Value(i64),
@@ -253,9 +252,6 @@ const Worktree = struct {
     stopped: atomic.Value(bool),
 
     refs: atomic.Value(u64),
-
-    scan_id: atomic.Value(u64),
-    completed_scan: u64,
 
     fn create(key: Key, abs_path: []const u8) !*Worktree {
         const gpa = scanner.gpa;
@@ -276,8 +272,6 @@ const Worktree = struct {
             .task_count = .init(0),
             .stopped = .init(false),
             .refs = .init(1),
-            .scan_id = .init(0),
-            .completed_scan = 0,
         };
         errdefer self.arena.deinit();
 
@@ -351,7 +345,6 @@ const Worktree = struct {
 
         const prev = self.task_count.fetchSub(1, .acq_rel);
         if (prev == 1) {
-            self.completed_scan = self.scan_id.load(.acquire);
             self.publish(.idle);
             return;
         }
@@ -403,8 +396,6 @@ const Worktree = struct {
         const task = try chunks.create(ScannerTask);
         errdefer chunks.destroy(task);
 
-        _ = self.scan_id.fetchAdd(1, .release);
-
         task.* = .{
             .worktree = self,
             .kind = .{
@@ -418,37 +409,6 @@ const Worktree = struct {
         };
 
         try self.pushTask(task);
-    }
-
-    //we need to handle the git ignore stack,
-    //we are going to make an structure that let us make a git ignore
-    //stack for every given path, once we have that we can make the scan request
-    //path, the reasong why we need the ignore strucutr efirst is because at this point
-    //we would need to read/load the ignore files again, even if we do that on a prev
-    //scan, maybe we could use a hashmap and add an entry for every path that we know has a
-    //git ignore file
-    fn scanRequest(self: *Worktree, subscription: u64, path: ChunkedPath) !void {
-        //load any pending directory
-        //this would take every ancestor of the path,
-        //see if we aready have an entry for the ancestor
-        //and see if the entry kind is unloaded, if it is unloaded we would
-        //load the directory into the snapshot,
-        _ = subscription;
-        _ = path;
-        //push the scan id up
-        _ = self.scan_id.fetchAdd(1, .release);
-        //reload the paths
-        //this would load the new metadata for the path,
-        //if there is no metadata we would need to remove the entry
-        //and in the case of directories, remove every child of it(remove path)
-        //on the othe rhand, with the new metadata we would need to update
-        //the existing entry, one detail, this part should not trigger a re scan
-        //of the directories, the reason is because we are not currently handling events,
-        //any request is for a change made by the user, we know what happening with those
-        //changes
-
-        //send status update
-        self.publish(if (self.task_count.load(.acquire) > 0) .scanning else .idle);
     }
 
     fn scanDir(self: *Worktree, dir_path: ChunkedPath, shared_fd: ?*SharedFd, ignore: ?*const IgnoreNode) !void {
@@ -603,10 +563,6 @@ const ScannerTask = struct {
             shared_fd: ?*SharedFd,
             ignore: ?*const IgnoreNode,
         },
-        scan_request: struct {
-            subscription: u6,
-            path: ChunkedPath,
-        },
     },
     task: Task,
 };
@@ -627,7 +583,6 @@ fn taskCallback(task: *Task) void {
     const result = switch (t.kind) {
         .initial_scan => worktree.initialScan(),
         .scan_dir => |dir| worktree.scanDir(dir.path, dir.shared_fd, dir.ignore),
-        .scan_request => |request| worktree.scanRequest(request.subscription, request.path),
     };
 
     result catch |err| switch (err) {
