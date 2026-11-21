@@ -93,6 +93,9 @@ pub fn init(gpa: Allocator, io: Io) !void {
 
     core.root = core.entities.get(key) orelse unreachable;
 
+    try scheduler.init(gpa, io);
+    errdefer scheduler.deinit();
+
     try core.loop.init(io);
     errdefer core.loop.deinit();
 
@@ -130,7 +133,6 @@ fn run(started: *Io.Event, result: *anyerror!void) void {
         started.set(core.io);
         return;
     };
-    defer scanner.deinit();
 
     started.set(core.io);
 
@@ -142,6 +144,10 @@ fn run(started: *Io.Event, result: *anyerror!void) void {
 pub fn deinit() void {
     core.stop.wake() catch {};
     core.future.await(core.io);
+
+    scanner.stop();
+    scheduler.deinit();
+    scanner.deinit();
 
     core.stop.deinit();
     core.wakeup.deinit();
@@ -158,8 +164,8 @@ pub fn deinit() void {
         .worktree => |*data| data.snapshot.deinit(),
     };
 
-    var it = core.worktree_cache.iterator();
-    while (it.next()) |cached| {
+    var iter = core.worktree_cache.iterator();
+    while (iter.next()) |cached| {
         cached.snapshot.deinit();
     }
 
@@ -391,9 +397,6 @@ test "Worktree" {
     const gpa = testing.allocator;
     const io = testing.io;
     const chromium_path = @import("test_options").chromium_path;
-
-    try scheduler.init(gpa, io);
-    defer scheduler.deinit();
 
     try init(gpa, io);
     defer deinit();

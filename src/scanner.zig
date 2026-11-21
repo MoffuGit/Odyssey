@@ -41,9 +41,6 @@ const Scanner = struct {
     chunks: ChunkAllocator,
 
     worktrees: HashTable(Key, Worktree, Key.Context),
-    task_count: atomic.Value(u64),
-    drained: Io.Event,
-
     waker: async.Waker,
     waker_c: async.Completion,
 };
@@ -55,8 +52,6 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .arena = .init(gpa),
         .chunks = undefined,
         .worktrees = undefined,
-        .task_count = .init(0),
-        .drained = .unset,
         .waker = undefined,
         .waker_c = .noop,
     };
@@ -73,17 +68,14 @@ pub fn init(gpa: Allocator, io: Io) !void {
     scanner.waker = try core.core.loop.await(&scanner.waker_c, wakeupCallback);
 }
 
+pub fn stop() void {
+    var iter = scanner.worktrees.iterator();
+    while (iter.next()) |worktree| worktree.stop();
+}
+
 pub fn deinit() void {
-    var stop_it = scanner.worktrees.iterator();
-    while (stop_it.next()) |worktree| worktree.stop();
-
-    while (scanner.task_count.load(.acquire) != 0) {
-        scanner.drained.waitUncancelable(scanner.io);
-        scanner.drained.reset();
-    }
-
-    var it = scanner.worktrees.iterator();
-    while (it.next()) |worktree| {
+    var iter = scanner.worktrees.iterator();
+    while (iter.next()) |worktree| {
         worktree.deinit();
     }
 
@@ -95,11 +87,11 @@ fn wakeupCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool
     res catch unreachable;
     const chunks = scanner.chunks.allocator();
 
-    var it = scanner.worktrees.iterator();
-    while (it.next()) |worktree| {
+    var iter = scanner.worktrees.iterator();
+    while (iter.next()) |worktree| {
         if (worktree.stopped.load(.acquire)) {
             if (worktree.task_count.load(.acquire) == 0) {
-                it.remove();
+                iter.remove();
                 worktree.deinit();
                 chunks.destroy(worktree);
             }
@@ -336,12 +328,8 @@ const Worktree = struct {
     fn pushTask(self: *Worktree, task: *ScannerTask) !void {
         if (self.stopped.load(.acquire)) return error.Closed;
 
-        _ = scanner.task_count.fetchAdd(1, .monotonic);
         _ = self.task_count.fetchAdd(1, .monotonic);
-        errdefer {
-            _ = self.task_count.fetchSub(1, .monotonic);
-            _ = scanner.task_count.fetchSub(1, .monotonic);
-        }
+        errdefer _ = self.task_count.fetchSub(1, .monotonic);
 
         try scheduler.push(&task.task);
     }
@@ -358,8 +346,6 @@ const Worktree = struct {
 
         _ = self.task_count.fetchSub(1, .release);
         if (last_task) scanner.waker.wake() catch {};
-
-        if (scanner.task_count.fetchSub(1, .acq_rel) == 1) scanner.drained.set(scanner.io);
     }
 
     fn publishThrottled(self: *Worktree) void {

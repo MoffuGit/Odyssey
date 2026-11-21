@@ -27,9 +27,6 @@ pub fn main(init: std.process.Init) !void {
 
     try global.init();
 
-    try scheduler.init(gpa, io);
-    defer scheduler.deinit();
-
     try core.init(gpa, io);
     defer core.deinit();
 
