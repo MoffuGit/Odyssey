@@ -341,21 +341,18 @@ const Worktree = struct {
         if (last_task) {
             self.publish(.idle);
         } else {
-            self.publishThrottled();
+            const now = Timestamp.now(scanner.io, .real).toMilliseconds();
+            const last = self.last_update.load(.acquire);
+
+            if (now - last >= UPDATE_INTERVAL_IN_MS) {
+                if (self.last_update.cmpxchgStrong(last, now, .acq_rel, .monotonic) == null) {
+                    self.publish(.scanning);
+                }
+            }
         }
 
         _ = self.task_count.fetchSub(1, .release);
         if (last_task) scanner.waker.wake() catch {};
-    }
-
-    fn publishThrottled(self: *Worktree) void {
-        const now = Timestamp.now(scanner.io, .real).toMilliseconds();
-        const last = self.last_update.load(.acquire);
-
-        if (now - last < UPDATE_INTERVAL_IN_MS) return;
-        if (self.last_update.cmpxchgStrong(last, now, .acq_rel, .monotonic) != null) return;
-
-        self.publish(.scanning);
     }
 
     fn initialScan(self: *Worktree) !void {
