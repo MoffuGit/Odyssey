@@ -92,7 +92,7 @@ fn wakeupCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool
         const snapshot = worktree.snapshot.clone(scanner.gpa) catch continue;
         core.pushEvt(.{ .worktree = .{
             .key = worktree.key,
-            .generation = worktree.generation.load(.acquire),
+            .generation = worktree.generation,
             .status = worktree.status,
             .snapshot = snapshot,
         } });
@@ -246,7 +246,7 @@ const Worktree = struct {
     snapshot: Snapshot,
     status: Status,
 
-    generation: atomic.Value(u64),
+    generation: u64,
 
     last_update: atomic.Value(i64),
     task_count: atomic.Value(u64),
@@ -271,7 +271,7 @@ const Worktree = struct {
             .mutex = .init,
             .snapshot = undefined,
             .status = .scanning,
-            .generation = .init(0),
+            .generation = 0,
             .last_update = .init(Timestamp.now(io, .real).toMilliseconds()),
             .task_count = .init(0),
             .stopped = .init(false),
@@ -326,7 +326,7 @@ const Worktree = struct {
             defer self.mutex.unlock(scanner.io);
 
             self.status = status;
-            _ = self.generation.fetchAdd(1, .release);
+            self.generation += 1;
         }
 
         scanner.waker.wake() catch {};
