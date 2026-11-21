@@ -60,7 +60,7 @@ pub fn deinit() void {
     wakeAll();
 
     scheduler.group.await(scheduler.io) catch |err| {
-        log.err("Scanner err={}", .{err});
+        log.err("Scheduler err={}", .{err});
     };
 
     scheduler.arena.deinit();

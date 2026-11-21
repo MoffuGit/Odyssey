@@ -1,7 +1,7 @@
 const std = @import("std");
-const Io = std.Io;
 
 const app = @import("app.zig");
+const async = @import("async.zig");
 const Bench = @import("bench.zig");
 const Buffer = @import("buffer.zig");
 const chunk_pool = @import("chunk_pool.zig");
@@ -10,11 +10,9 @@ const core = @import("core.zig");
 const datastruct = @import("datastruct.zig");
 const font = @import("font.zig");
 const global = @import("global.zig");
-const async = @import("async.zig");
 const patch = @import("patch.zig");
 const renderer = @import("renderer.zig");
 const scheduler = @import("scheduler.zig");
-const scanner = @import("scanner.zig");
 const view = @import("view.zig");
 const win = @import("window.zig");
 const Worktree = @import("worktree.zig");
@@ -34,9 +32,6 @@ pub fn main(init: std.process.Init) !void {
 
     try core.init(gpa, io);
     defer core.deinit();
-
-    try scanner.init(gpa, io);
-    defer scanner.deinit();
 
     try renderer.init();
     defer renderer.deinit();
@@ -63,6 +58,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
+    _ = core;
     _ = font;
     _ = view;
     _ = renderer;

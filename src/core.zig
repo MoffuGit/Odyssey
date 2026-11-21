@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const heap = std.heap;
 const Io = std.Io;
+const testing = std.testing;
 
 const async = @import("async.zig");
 const chunk_pool = @import("chunk_pool.zig");
@@ -15,6 +16,7 @@ const DoublyLinkedList = datastruct.DoublyLinkedList;
 const HashTable = datastruct.HashTable;
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const scanner = @import("scanner.zig");
+const scheduler = @import("scheduler.zig");
 
 const log = std.log.scoped(.core);
 
@@ -108,19 +110,53 @@ pub fn init(gpa: Allocator, io: Io) !void {
     }.stop);
     errdefer core.stop.deinit();
 
-    core.future = try io.concurrent(struct {
-        pub fn run() void {
-            core.loop.run(.until_done) catch {};
-        }
-    }.run, .{});
+    var started: Io.Event = .unset;
+    var result: anyerror!void = {};
+
+    var future = try core.io.concurrent(run, .{ &started, &result });
+    started.waitUncancelable(core.io);
+
+    result catch |err| {
+        future.await(core.io);
+        return err;
+    };
+
+    core.future = future;
+}
+
+fn run(started: *Io.Event, result: *anyerror!void) void {
+    scanner.init(core.gpa, core.io) catch |err| {
+        result.* = err;
+        started.set(core.io);
+        return;
+    };
+    defer scanner.deinit();
+
+    started.set(core.io);
+
+    core.loop.run(.until_done) catch |err| {
+        log.err("Loop err={}", .{err});
+    };
 }
 
 pub fn deinit() void {
     core.stop.wake() catch {};
     core.future.await(core.io);
+
     core.stop.deinit();
     core.wakeup.deinit();
     core.loop.deinit();
+
+    var messages: [128]Message = undefined;
+    const messages_len = core.messages.pop(&messages);
+    for (messages[0..messages_len]) |msg| msg.free();
+
+    var events: [128]Event = undefined;
+    const events_len = core.events.pop(&events);
+    for (events[0..events_len]) |*evt| switch (evt.*) {
+        .echo => {},
+        .worktree => |*data| data.snapshot.deinit(),
+    };
 
     var it = core.worktree_cache.iterator();
     while (it.next()) |cached| {
@@ -143,13 +179,10 @@ fn wakeupCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool
 
         switch (msg) {
             .echo => |id| core.events.push(.{ .echo = id }),
-            .open_worktree => {
-                // scanner.open(data.key, data.abs_path) catch |err| {
-                //     log.err("Open worktree path=\"{s}\" err={}", .{ data.abs_path, err });
-                // };
+            .open_worktree => |data| scanner.open(data.key, data.abs_path) catch |err| {
+                log.err("Open worktree path=\"{s}\" err={}", .{ data.abs_path, err });
             },
-            .close_worktree => {},
-            //scanner.close(key),
+            .close_worktree => |key| scanner.close(key),
         }
     }
 
@@ -163,6 +196,36 @@ pub fn flush() !void {
     for (buffer[0..len]) |evt| {
         switch (evt) {
             .echo => |id| log.debug("echo: {}", .{id}),
+            .worktree => |data| {
+                var snapshot = data.snapshot;
+
+                if (core.entities.get(data.key) == null) {
+                    snapshot.deinit();
+                    return;
+                }
+
+                const entry = if (core.worktree_cache.get(data.key)) |entry| blk: {
+                    entry.snapshot.deinit();
+                    break :blk entry;
+                } else blk: {
+                    const entry = core.chunks.allocator().create(WorktreeCache) catch |err| {
+                        snapshot.deinit();
+                        return err;
+                    };
+                    entry.* = .{
+                        .key = data.key,
+                        .generation = undefined,
+                        .status = undefined,
+                        .snapshot = undefined,
+                    };
+                    core.worktree_cache.insert(data.key, entry);
+                    break :blk entry;
+                };
+
+                entry.generation = data.generation;
+                entry.status = data.status;
+                entry.snapshot = snapshot;
+            },
         }
     }
 
@@ -193,6 +256,10 @@ pub fn flush() !void {
     try core.wakeup.wake();
 }
 
+pub fn worktree(key: Key) ?*const WorktreeCache {
+    return core.worktree_cache.get(key);
+}
+
 pub fn pushMsg(msg: Message) !void {
     core.messages.push(try msg.clone());
 }
@@ -202,6 +269,10 @@ pub fn pushCmd(params: Params) !void {
     const cmd = try arena.create(Command);
     cmd.* = .{ .params = try params.clone() };
     core.commands.append(cmd);
+}
+
+pub fn pushEvt(evt: Event) void {
+    return core.events.push(evt);
 }
 
 fn insert(parent: ?*Entity, kind: EntityKind) Key {
@@ -263,6 +334,12 @@ pub const Message = union(enum) {
 
 pub const Event = union(enum) {
     echo: u64,
+    worktree: struct {
+        key: Key,
+        generation: u64,
+        status: scanner.Status,
+        snapshot: scanner.Snapshot,
+    },
 };
 
 pub const Params = union(enum) {
@@ -310,37 +387,31 @@ pub const WorktreeCache = struct {
     pub const Context = Key.Context;
 };
 
-// test "Worktree" {
-//     const gpa = testing.allocator;
-//     const io = testing.io;
-//     const chromium_path = @import("test_options").chromium_path;
-//
-//     try global.init();
-//     defer global.deinit();
-//
-//     try scheduler.init(gpa, io);
-//     defer scheduler.deinit();
-//
-//     try scanner.init(gpa, io);
-//     defer scanner.deinit();
-//
-//     try core.init(gpa, io);
-//     defer core.deinit();
-//
-//     try core.pushCmd(.{ .open_worktree = chromium_path });
-//
-//     try core.flush();
-//
-//     const key = core.core.root.childrens.first.?.key;
-//
-//     const worktree = while (true) {
-//         if (try core.worktree(key)) |worktree| break worktree;
-//         try io.sleep(.fromMilliseconds(1), .awake);
-//     };
-//     try testing.expectEqualStrings(chromium_path, worktree.snapshot.abs_root);
-//
-//     try core.pushCmd(.{ .close_worktree = key });
-//     try core.flush();
-//
-//     try testing.expect(try core.worktree(key) == null);
-// }
+test "Worktree" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    const chromium_path = @import("test_options").chromium_path;
+
+    try scheduler.init(gpa, io);
+    defer scheduler.deinit();
+
+    try init(gpa, io);
+    defer deinit();
+
+    try pushCmd(.{ .open_worktree = chromium_path });
+    try flush();
+
+    const key = core.root.childrens.first.?.key;
+
+    const cached = while (true) {
+        try flush();
+        if (worktree(key)) |cached| break cached;
+        try io.sleep(.fromMilliseconds(1), .awake);
+    };
+    try testing.expectEqualStrings(chromium_path, cached.snapshot.abs_root);
+
+    try pushCmd(.{ .close_worktree = key });
+    try flush();
+
+    try testing.expect(worktree(key) == null);
+}
