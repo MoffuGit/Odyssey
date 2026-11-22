@@ -7,6 +7,8 @@ const ChunkAllocator = chunk_pool.ChunkAllocator;
 const datastruct = @import("datastruct.zig");
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 
+const DELIMITER: u8 = '|';
+
 pub const Properties = @This();
 
 chunks: ChunkAllocator,
@@ -83,6 +85,50 @@ pub fn remove(self: *Properties, property: *Property) void {
     chunks.destroy(property);
 }
 
+fn parseKeys(comptime str: []const u8) [countKeys(str)][]const u8 {
+    var result: [countKeys(str)][]const u8 = undefined;
+    var iter = std.mem.splitScalar(u8, str, DELIMITER);
+
+    var i: usize = 0;
+    while (iter.next()) |key| : (i += 1) {
+        result[i] = key;
+    }
+
+    return result;
+}
+
+fn countKeys(comptime str: []const u8) usize {
+    var iter = std.mem.splitScalar(u8, str, DELIMITER);
+    var count: usize = 0;
+
+    while (iter.next()) |_| {
+        count += 1;
+    }
+
+    return count;
+}
+
+pub fn find(self: *Properties, comptime str: []const u8) ?*Property {
+    const keys = parseKeys(str);
+    var current: *Property = self.root;
+
+    inline for (keys) |key| {
+        var found: ?*Property = null;
+
+        var iter = current.childrens.iterator();
+        while (iter.next()) |child| {
+            if (std.mem.eql(u8, child.str, key)) {
+                found = child;
+                break;
+            }
+        }
+
+        current = found orelse return null;
+    }
+
+    return current;
+}
+
 pub const Property = struct {
     next: ?*Property = null,
     prev: ?*Property = null,
@@ -124,11 +170,13 @@ test "Property tree" {
     _ = try properties.insert(first, "100");
 
     const second = try properties.insert(null, "second");
+    const third = try properties.insert(second, "third");
 
     try testing.expectEqual(2, properties.root.childrens.len());
 
     try testing.expectEqual(first, properties.root.get("first"));
     try testing.expectEqual(second, properties.root.get("second"));
+    try testing.expectEqual(third, properties.find("second|third"));
 
     try testing.expectEqual(100, first.first().?.into(u8));
 }
