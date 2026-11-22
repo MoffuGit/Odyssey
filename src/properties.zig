@@ -42,12 +42,14 @@ pub fn create(self: *Properties, str: []const u8) !*Property {
     return property;
 }
 
-pub fn insert(self: *Properties, parent: ?*Property, str: []const u8) !void {
+pub fn insert(self: *Properties, parent: ?*Property, str: []const u8) !*Property {
     const property = try self.create(str);
 
     const p = parent orelse self.root;
     p.childrens.append(property);
     property.parent = p;
+
+    return property;
 }
 
 pub fn prune(self: *Properties, property: *Property) void {
@@ -88,6 +90,27 @@ pub const Property = struct {
     childrens: DoublyLinkedList(Property) = .empty,
 
     str: []u8,
+
+    pub fn first(self: *Property) ?*Property {
+        return self.childrens.first;
+    }
+
+    pub fn get(self: *Property, str: []const u8) ?*Property {
+        var iter = self.childrens.iterator();
+        while (iter.next()) |p| {
+            if (std.mem.eql(u8, p.str, str)) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    pub fn into(self: *@This(), comptime T: type) ?T {
+        return switch (@typeInfo(T)) {
+            .int => std.fmt.parseInt(T, self.str, 10) catch null,
+            else => null,
+        };
+    }
 };
 
 test "Property tree" {
@@ -97,11 +120,15 @@ test "Property tree" {
     try properties.init(gpa);
     defer properties.deinit(gpa);
 
-    try properties.insert(null, "first");
-    try properties.insert(null, "second");
+    const first = try properties.insert(null, "first");
+    _ = try properties.insert(first, "100");
 
-    var iter = properties.root.childrens.iterator();
+    const second = try properties.insert(null, "second");
 
-    try testing.expectEqualStrings("first", iter.next().?.str);
-    try testing.expectEqualStrings("second", iter.next().?.str);
+    try testing.expectEqual(2, properties.root.childrens.len());
+
+    try testing.expectEqual(first, properties.root.get("first"));
+    try testing.expectEqual(second, properties.root.get("second"));
+
+    try testing.expectEqual(100, first.first().?.into(u8));
 }
