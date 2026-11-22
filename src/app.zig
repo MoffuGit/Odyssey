@@ -20,12 +20,14 @@ const font = @import("font.zig");
 const renderer = @import("renderer.zig");
 const view = @import("view.zig");
 const win = @import("window.zig");
+const Properties = @import("properties.zig");
 
 const log = std.log.scoped(.app);
 
 var app: App = undefined;
 
 const App = struct {
+    properties: Properties,
     io: Io,
     gpa: Allocator,
     arena: ArenaAllocator,
@@ -38,6 +40,7 @@ const App = struct {
 
 pub fn init(gpa: Allocator, io: Io) !void {
     app = .{
+        .properties = undefined,
         .collection = 0,
         .frame = 0,
         .io = io,
@@ -60,6 +63,8 @@ pub fn init(gpa: Allocator, io: Io) !void {
             .chunk_size = @sizeOf(WindowState),
         },
     });
+
+    try app.properties.init(arena);
 
     try app.display.init(display, io);
     errdefer app.display.deinit();
@@ -164,7 +169,9 @@ pub fn render() !void {
                 view.textColor(.{ 1.0, 0.0, 0.0, 1.0 });
                 view.textAlign(.center);
 
-                if (view.button("Hello@@@orange").clicked) log.debug("orange got clicked", .{});
+                if (view.button("Hello@@@orange").clicked) {
+                    log.debug("orange got clicked", .{});
+                }
             }
 
             view.background(.{ 0.0, 0.0, 1.0, 1.0 });
