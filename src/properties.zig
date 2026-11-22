@@ -53,7 +53,7 @@ pub fn insert(self: *Properties, parent: ?*Property, str: []const u8) !void {
 pub fn prune(self: *Properties, property: *Property) void {
     var iter = property.childrens.iterator();
     while (iter.next()) |p| {
-        self.destroy(p);
+        self.remove(p);
     }
 }
 
@@ -65,7 +65,7 @@ pub fn replace(self: *Properties, proterty: *Property, str: []const u8) !void {
     proterty.str = dupe;
 }
 
-pub fn destroy(self: *Properties, property: *Property) void {
+pub fn remove(self: *Properties, property: *Property) void {
     const chunks = self.chunks.allocator();
 
     if (property.parent) |p| {
@@ -74,7 +74,7 @@ pub fn destroy(self: *Properties, property: *Property) void {
 
     var iter = property.childrens.iterator();
     while (iter.next()) |p| {
-        self.destroy(p);
+        self.remove(p);
     }
 
     chunks.destroy(property.str);

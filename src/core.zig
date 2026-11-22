@@ -245,13 +245,14 @@ pub fn flush() !void {
             },
             .close_worktree => |key| {
                 const chunks = core.chunks.allocator();
+                const entity = core.entities.get(key) orelse continue;
 
                 if (core.worktree_cache.remove(key)) |cached| {
                     cached.snapshot.deinit();
                     chunks.destroy(cached);
                 }
 
-                remove(key);
+                remove(entity);
 
                 try pushMsg(.{ .close_worktree = key });
             },
@@ -299,17 +300,20 @@ fn insert(parent: ?*Entity, kind: EntityKind) Key {
     return key;
 }
 
-fn remove(key: Key) void {
-    const entity = core.entities.get(key) orelse return;
-
+fn remove(entity: *Entity) void {
     if (entity.parent) |p| {
         p.childrens.remove(entity);
     }
 
     var iter = entity.childrens.iterator();
-    while (iter.next()) |child| remove(child.key);
+    while (iter.next()) |child| remove(child);
 
-    core.entities.remove(key);
+    core.entities.remove(entity.key);
+}
+
+fn prune(entity: *Entity) void {
+    var iter = entity.childrens.iterator();
+    while (iter.next()) |child| remove(child.key);
 }
 
 fn childFromKind(parent: *Entity, kind: EntityKind) ?*Entity {
