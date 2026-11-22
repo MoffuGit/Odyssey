@@ -35,7 +35,9 @@ pub fn create(self: *Properties, str: []const u8) !*Property {
     const chunks = self.chunks.allocator();
     const property = try chunks.create(Property);
 
-    property.str = try chunks.dupe(u8, str);
+    property.* = .{
+        .str = try chunks.dupe(u8, str),
+    };
 
     return property;
 }
@@ -43,8 +45,9 @@ pub fn create(self: *Properties, str: []const u8) !*Property {
 pub fn insert(self: *Properties, parent: ?*Property, str: []const u8) !void {
     const property = try self.create(str);
 
-    parent.childrens.append(property);
-    property.parent = parent orelse self.root;
+    const p = parent orelse self.root;
+    p.childrens.append(property);
+    property.parent = p;
 }
 
 pub fn prune(self: *Properties, property: *Property) void {
@@ -52,6 +55,14 @@ pub fn prune(self: *Properties, property: *Property) void {
     while (iter.next()) |p| {
         self.destroy(p);
     }
+}
+
+pub fn replace(self: *Properties, proterty: *Property, str: []const u8) !void {
+    const chunks = self.chunks.allocator();
+    const dupe = try chunks.dupe(u8, str);
+    chunks.free(proterty.str);
+
+    proterty.str = dupe;
 }
 
 pub fn destroy(self: *Properties, property: *Property) void {
@@ -85,4 +96,12 @@ test "Property tree" {
     var properties: Properties = undefined;
     try properties.init(gpa);
     defer properties.deinit(gpa);
+
+    try properties.insert(null, "first");
+    try properties.insert(null, "second");
+
+    var iter = properties.root.childrens.iterator();
+
+    try testing.expectEqualStrings("first", iter.next().?.str);
+    try testing.expectEqualStrings("second", iter.next().?.str);
 }
