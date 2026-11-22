@@ -551,9 +551,6 @@ const Collection = struct {
     runs: HashTable(Run.Key, Run, Run.Context),
     context: *kb.kbts_shape_context,
 
-    /// The shape context and everything it allocates live in `arena`. kb only frees
-    /// its blocks in kbts_DestroyShapeContext and reuses them internally otherwise, so
-    /// the context never needs destroying: resetting or freeing the arena releases it.
     pub fn init(self: *Collection, key: u64, arena: *ArenaAllocator) !void {
         self.* = .{
             .tags = .empty,
