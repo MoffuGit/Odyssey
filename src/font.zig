@@ -57,8 +57,6 @@ pub fn init(gpa: Allocator) !void {
 }
 
 pub fn deinit() void {
-    var iter = cache.collections.iterator();
-    while (iter.next()) |collection| collection.deinit();
     cache.atlas.deinit();
     cache.arena.deinit();
     cache.buffer.deinit(cache.gpa);
@@ -120,7 +118,7 @@ pub fn addFont(data: *Data, index: u32, tag: Tag) !void {
 
     const font = try arena.create(Font);
 
-    try font.init(data, index, tag, arena);
+    try font.init(data, index, tag, arena, cache.gpa);
     cache.fonts.insert(tag.font_hash, font);
 }
 
@@ -133,7 +131,7 @@ pub fn addCollection(tags: []const Tag) !u64 {
     const arena = cache.arena.allocator();
 
     const collection = try arena.create(Collection);
-    try collection.init(key, arena);
+    try collection.init(key, &cache.arena);
 
     for (tags) |tag| {
         const font = cache.fonts.get(tag.font_hash) orelse continue;
@@ -313,7 +311,7 @@ const Font = struct {
     glyphs: HashTable(Glyph.Key, Glyph, Glyph.Context),
     metrics: Metrics,
 
-    pub fn init(self: *Font, data: *Data, index: u32, tag: Tag, arena: Allocator) !void {
+    pub fn init(self: *Font, data: *Data, index: u32, tag: Tag, arena: Allocator, gpa: Allocator) !void {
         self.* = .{
             .index = index,
             .tag = tag,
@@ -328,13 +326,28 @@ const Font = struct {
 
         const offset = TrueType.fontOffsetForIndex(data.bytes, index) orelse return;
         self.ttf = TrueType.load(data.bytes, offset) catch return;
-        self.kbf = kb.kbts_FontFromMemory(
+        self.kbf = std.mem.zeroes(kb.kbts_font);
+        var state = std.mem.zeroes(kb.kbts_load_font_state);
+        var scratch_size: c_int = 0;
+        var output_size: c_int = 0;
+        switch (kb.kbts_LoadFont(
+            &self.kbf,
+            &state,
             @constCast(data.bytes.ptr),
             @intCast(data.bytes.len),
             @intCast(index),
-            null,
-            null,
-        );
+            &scratch_size,
+            &output_size,
+        )) {
+            kb.KBTS_LOAD_FONT_ERROR_NONE => {},
+            kb.KBTS_LOAD_FONT_ERROR_NEED_TO_CREATE_BLOB => {
+                const scratch = try gpa.alignedAlloc(u8, .@"16", @intCast(scratch_size));
+                defer gpa.free(scratch);
+                const output = try arena.alignedAlloc(u8, .@"16", @intCast(output_size));
+                if (kb.kbts_PlaceBlob(&self.kbf, &state, scratch.ptr, output.ptr) != kb.KBTS_LOAD_FONT_ERROR_NONE) return;
+            },
+            else => return,
+        }
 
         if (kb.kbts_FontIsValid(&self.kbf) != 1) return;
 
@@ -538,7 +551,10 @@ const Collection = struct {
     runs: HashTable(Run.Key, Run, Run.Context),
     context: *kb.kbts_shape_context,
 
-    pub fn init(self: *Collection, key: u64, arena: Allocator) !void {
+    /// The shape context and everything it allocates live in `arena`. kb only frees
+    /// its blocks in kbts_DestroyShapeContext and reuses them internally otherwise, so
+    /// the context never needs destroying: resetting or freeing the arena releases it.
+    pub fn init(self: *Collection, key: u64, arena: *ArenaAllocator) !void {
         self.* = .{
             .tags = .empty,
             .key = key,
@@ -546,12 +562,16 @@ const Collection = struct {
             .context = undefined,
         };
 
-        self.context = kb.kbts_CreateShapeContext2(null, null, ContextFlag) orelse return error.KBCTXERROR;
-        try self.runs.init(1028, .{}, arena);
+        const memory = try arena.allocator().alignedAlloc(u8, .@"16", @intCast(kb.kbts_SizeOfShapeContext()));
+        self.context = kb.kbts_PlaceShapeContext2(kbArenaAllocator, arena, memory.ptr, ContextFlag) orelse return error.KBCTXERROR;
+        try self.runs.init(1028, .{}, arena.allocator());
     }
 
-    pub fn deinit(self: *Collection) void {
-        self.context.DestroyShapeContext();
+    fn kbArenaAllocator(data: ?*anyopaque, op: [*c]kb.kbts_allocator_op) callconv(.c) void {
+        if (op.*.Kind != kb.KBTS_ALLOCATOR_OP_KIND_ALLOCATE) return;
+        const arena: *ArenaAllocator = @ptrCast(@alignCast(data));
+        const allocate = &op.*.unnamed_0.Allocate;
+        allocate.Pointer = arena.allocator().rawAlloc(allocate.Size, .@"16", @returnAddress());
     }
 
     pub fn add(self: *Collection, font: *Font, arena: Allocator) !void {
