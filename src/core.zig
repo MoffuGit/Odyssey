@@ -312,6 +312,15 @@ fn remove(key: Key) void {
     core.entities.remove(key);
 }
 
+fn childFromKind(parent: *Entity, kind: EntityKind) ?*Entity {
+    var iter = parent.childrens.iterator();
+    while (iter.next()) |child| {
+        if (child.kind == kind) return child;
+    }
+
+    return null;
+}
+
 pub const Message = union(enum) {
     echo: u64,
     open_worktree: struct {
@@ -407,7 +416,7 @@ test "Worktree" {
     try pushCmd(.{ .open_worktree = chromium_path });
     try flush();
 
-    const key = core.root.childrens.first.?.key;
+    const key = childFromKind(core.root, .worktree).?.key;
 
     const cached = while (true) {
         try flush();
@@ -450,7 +459,7 @@ test "benchmark: Worktree initial scan" {
         try pushCmd(.{ .open_worktree = chromium_path });
         try flush();
 
-        const key = core.root.childrens.first.?.key;
+        const key = childFromKind(core.root, .worktree).?.key;
 
         while (true) {
             try flush();
