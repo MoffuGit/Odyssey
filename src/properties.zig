@@ -13,9 +13,11 @@ pub const Properties = @This();
 
 chunks: ChunkAllocator,
 root: *Property,
+generation: u64,
 
 pub fn init(self: *Properties, alloc: Allocator) !void {
     self.* = .{
+        .generation = 0,
         .chunks = undefined,
         .root = undefined,
     };
@@ -39,7 +41,10 @@ pub fn create(self: *Properties, str: []const u8) !*Property {
 
     property.* = .{
         .str = try chunks.dupe(u8, str),
+        .id = self.generation,
     };
+
+    self.generation += 1;
 
     return property;
 }
@@ -136,6 +141,7 @@ pub const Property = struct {
     childrens: DoublyLinkedList(Property) = .empty,
 
     str: []u8,
+    id: u64,
 
     pub fn first(self: *Property) ?*Property {
         return self.childrens.first;
