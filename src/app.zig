@@ -94,7 +94,7 @@ fn display() bool {
                     window_state.closed = true;
                 }
             },
-            .mouse_button => window_state.view.pushEvent(evt.data),
+            .mouse_button => |data| window_state.view.pushEvent(.{ .mouse_button = data }),
             else => {},
         }
     }

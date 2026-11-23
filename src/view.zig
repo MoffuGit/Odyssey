@@ -39,7 +39,7 @@ pub const View = struct {
     pop_flags: u64,
     hot: ?u64,
     active: ?u64,
-    events: DoublyLinkedList(Event),
+    events: DoublyLinkedList(EventNode),
     cache: Cache,
 
     pub fn init(self: *View, gpa: Allocator) !void {
@@ -67,7 +67,6 @@ pub const View = struct {
             try chunk.init(arena, &.{
                 .{ .capacity = 2048, .chunk_size = @sizeOf(Attribute) + @sizeOf(?*Attribute) },
                 .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
-                .{ .capacity = 128, .chunk_size = @sizeOf(Event) },
             });
         }
 
@@ -80,14 +79,14 @@ pub const View = struct {
         self.arena.deinit();
     }
 
-    pub fn pushEvent(self: *View, @"type": win.Data) void {
+    pub fn pushEvent(self: *View, evt: Event) void {
         const chunks = self.frameChunks();
 
-        const event = chunks.create(Event) catch @panic("Chunk Overflow");
+        const node = chunks.create(EventNode) catch @panic("Chunk Overflow");
 
-        event.* = .{ .type = @"type" };
+        node.* = .{ .event = evt };
 
-        self.events.append(event);
+        self.events.append(node);
     }
 
     fn frameArena(self: *View) Allocator {
@@ -239,14 +238,11 @@ pub fn signal(block: *Block) Signal {
 
     const in_bounds = rng2.contains(rect, mouse);
 
-    var node = local.events.first;
-
-    while (node) |event| {
-        node = event.next;
-
+    var iter = local.events.iterator();
+    while (iter.next()) |node| {
         var consumed = false;
 
-        switch (event.type) {
+        switch (node.event) {
             .mouse_button => |data| {
                 if (flags.mouse and
                     data.type == .mouse_button_pressed and
@@ -271,7 +267,7 @@ pub fn signal(block: *Block) Signal {
             else => unreachable,
         }
 
-        if (consumed) local.events.remove(event);
+        if (consumed) local.events.remove(node);
     }
 
     if (flags.mouse and in_bounds and
@@ -525,10 +521,21 @@ pub fn button(str: []const u8) Signal {
     return signal(block);
 }
 
-const Event = struct {
-    next: ?*Event = null,
-    prev: ?*Event = null,
-    type: win.Data,
+const EventNode = struct {
+    next: ?*EventNode = null,
+    prev: ?*EventNode = null,
+    event: Event,
+};
+
+const Event = union(enum) {
+    none,
+    key: win.Key,
+    key_char: u32,
+    mouse_motion: win.MouseMotion,
+    mouse_button: win.MouseButton,
+    mouse_scroll: win.MouseScroll,
+    data_drop,
+    data_drag,
 };
 
 pub const Attribute = union(enum) {
