@@ -177,8 +177,8 @@ pub fn finish() void {
             const animation: *Animation = @fieldParentPtr("cached", cached);
 
             switch (animation.kind) {
-                .exponential => |rate| {
-                    animation.current += (animation.target - animation.current) * rate;
+                .exponential => |expo| {
+                    animation.current += (animation.target - animation.current) * expo.rate;
                 },
                 else => unreachable,
             }
@@ -362,8 +362,10 @@ pub fn animate(key: u64, opts: Animation.Options) f32 {
     }
 
     switch (opts.kind) {
-        .exponential => |rate| {
-            if (rate == 1.0 or @abs(animation.current - opts.target) < @abs(0.005)) {
+        .exponential => |expo| {
+            assert(expo.epsilon != 0);
+
+            if (expo.rate == 1.0 or @abs(animation.current - opts.target) < @abs(expo.epsilon)) {
                 animation.current = opts.target;
             }
         },
@@ -679,7 +681,10 @@ const Animation = struct {
 };
 
 pub const AnimationKind = union(enum) {
-    exponential: f32,
+    exponential: struct {
+        rate: f32,
+        epsilon: f32 = 0.005,
+    },
     easing: struct {
         duration: f32,
         cubic_bezier: [4]f32,
