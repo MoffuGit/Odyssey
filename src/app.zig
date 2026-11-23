@@ -194,8 +194,9 @@ pub fn render() !void {
             var node = window_state.view.root;
             while (node) |block| : (node = block.nextPre()) {
                 const rect = block.rect[0] ++ block.rect[1];
+                const flags = block.flags;
 
-                if (block.flags.background) {
+                if (flags.background) {
                     try frame.rect(.{
                         .position = rect,
                         .src_position = undefined,
@@ -207,7 +208,7 @@ pub fn render() !void {
                     });
                 }
 
-                if (block.flags.border) {
+                if (flags.border) {
                     try frame.rect(.{
                         .position = rect,
                         .src_position = undefined,
@@ -259,6 +260,14 @@ pub fn render() !void {
 
                         cursor_x += piece.advance_x;
                         cursor_y += piece.advance_y;
+                    }
+
+                    if (flags.animate) {
+                        const key = block.key orelse unreachable;
+                        const hot_key = view.keyFromString(key, view.HOT_ANIMATION) orelse unreachable;
+                        const hot_sample = view.sample(hot_key) orelse unreachable;
+
+                        log.info("hot animation: {}", .{hot_sample});
                     }
                 }
             }

@@ -22,6 +22,8 @@ const Window = win.Window;
 
 const log = std.log.scoped(.view);
 
+pub const HOT_ANIMATION = "@@@hot_animation";
+
 threadlocal var local: *View = undefined;
 
 pub const View = struct {
@@ -40,7 +42,9 @@ pub const View = struct {
     hot: ?u64,
     active: ?u64,
     events: DoublyLinkedList(EventNode),
-    cache: Cache,
+    block_cache: HashTable(u64, Cached, Block.Context),
+    animation_cache: HashTable(u64, Cached, Animation.Context),
+    active_animations: DoublyLinkedList(Animation),
 
     pub fn init(self: *View, gpa: Allocator) !void {
         self.* = .{
@@ -48,7 +52,8 @@ pub const View = struct {
             .hot = null,
             .events = .empty,
             .mouse = @splat(0.0),
-            .cache = undefined,
+            .block_cache = undefined,
+            .animation_cache = undefined,
             .arena = .init(gpa),
             .root = null,
             .block_count = 0,
@@ -58,6 +63,7 @@ pub const View = struct {
             .stacks = .empty,
             .pop_flags = 0,
             .chunks = undefined,
+            .active_animations = .empty,
         };
 
         const arena = self.arena.allocator();
@@ -70,8 +76,12 @@ pub const View = struct {
             });
         }
 
-        try self.chunks.init(arena, &.{.{ .capacity = 2048, .chunk_size = @sizeOf(Block) }});
-        try self.cache.init(2048, .{}, arena);
+        try self.chunks.init(arena, &.{
+            .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
+            .{ .capacity = 2048, .chunk_size = @sizeOf(Animation) },
+        });
+        try self.block_cache.init(2048, .{}, arena);
+        try self.animation_cache.init(2048, .{}, arena);
     }
 
     pub fn deinit(self: *View) void {
@@ -101,6 +111,8 @@ pub const View = struct {
 pub fn begin(view: *View, window: Window, resize: bool, fnt: u64) void {
     local = view;
 
+    const chunks = local.chunks.allocator();
+
     const window_size = window.size() catch .{ 0.0, 0.0 };
 
     local.root = null;
@@ -125,6 +137,15 @@ pub fn begin(view: *View, window: Window, resize: bool, fnt: u64) void {
     pushAttr(.{ .height = .fit });
     pushAttr(.{ .font_family = fnt });
     pushAttr(.{ .font_size = 32.0 });
+
+    var iter = local.active_animations.iterator();
+    while (iter.next()) |animation| {
+        if (animation.last_frame + 2 >= local.frame) break;
+
+        _ = local.animation_cache.remove(animation.key);
+        local.active_animations.remove(animation);
+        chunks.destroy(animation);
+    }
 }
 
 pub fn finish() void {
@@ -135,14 +156,50 @@ pub fn finish() void {
         root.layout(axis);
     }
 
-    var iter = local.cache.iterator();
+    {
+        var iter = local.block_cache.iterator();
 
-    while (iter.next()) |cached| {
-        const block: *Block = @fieldParentPtr("cached", cached);
+        while (iter.next()) |cached| {
+            const block: *Block = @fieldParentPtr("cached", cached);
 
-        if (block.touched_frame != local.frame) {
-            iter.remove();
-            chunks.destroy(block);
+            if (block.touched_frame != local.frame) {
+                iter.remove();
+                chunks.destroy(block);
+            }
+        }
+    }
+
+    {
+        var iter = local.block_cache.iterator();
+        while (iter.next()) |cached| {
+            const block: *Block = @fieldParentPtr("cached", cached);
+            const key = block.key orelse unreachable;
+
+            if (block.flags.animate) {
+                const is_hot = local.hot == key;
+
+                const target: f32 = if (is_hot) 1.0 else 0.0;
+
+                _ = animate(keyFromString(key, HOT_ANIMATION) orelse unreachable, .{
+                    .initial = 0.0,
+                    .target = target,
+                    .kind = .{ .exponential = 0.2 },
+                });
+            }
+        }
+    }
+
+    {
+        var iter = local.animation_cache.iterator();
+        while (iter.next()) |cached| {
+            const animation: *Animation = @fieldParentPtr("cached", cached);
+
+            switch (animation.kind) {
+                .exponential => |rate| {
+                    animation.current += (animation.target - animation.current) * rate;
+                },
+                else => unreachable,
+            }
         }
     }
 
@@ -153,8 +210,12 @@ pub fn finish() void {
 
     _ = local.frame_arenas[frame_index].reset(.retain_capacity);
     _ = local.frame_chunks[frame_index].reset();
+}
 
-    local = undefined;
+pub fn sample(key: u64) ?f32 {
+    const cached = local.animation_cache.get(key) orelse return null;
+    const animation: *Animation = @fieldParentPtr("cached", cached);
+    return animation.current;
 }
 
 pub fn getSeed() u64 {
@@ -285,6 +346,51 @@ pub fn signal(block: *Block) Signal {
     return _signal;
 }
 
+pub fn animate(key: u64, opts: Animation.Options) f32 {
+    const chunks = local.chunks.allocator();
+
+    var animation: *Animation = undefined;
+
+    if (local.animation_cache.get(key)) |cached| {
+        animation = @fieldParentPtr("cached", cached);
+        local.active_animations.remove(animation);
+    } else {
+        animation = chunks.create(Animation) catch @panic("Chunk Overflow");
+        animation.* = .{
+            .last_frame = local.frame,
+            .first_frame = local.frame,
+            .current = opts.initial,
+            .initial = opts.initial,
+            .target = opts.target,
+            .kind = opts.kind,
+            .key = key,
+        };
+        local.animation_cache.insert(key, &animation.cached);
+    }
+
+    animation.last_frame = local.frame;
+    animation.initial = opts.initial;
+    animation.target = opts.target;
+    animation.kind = opts.kind;
+
+    local.active_animations.append(animation);
+
+    if (opts.reset) {
+        animation.current = opts.initial;
+    }
+
+    switch (opts.kind) {
+        .exponential => |rate| {
+            if (rate == 1.0 or @abs(animation.current - opts.target) < @abs(0.005)) {
+                animation.current = opts.target;
+            }
+        },
+        else => unreachable,
+    }
+
+    return animation.current;
+}
+
 pub fn fmt(comptime format: []const u8, args: anytype) ![]u8 {
     const frame_arena = local.frameArena();
 
@@ -294,12 +400,7 @@ pub fn fmt(comptime format: []const u8, args: anytype) ![]u8 {
     return std.fmt.bufPrint(buffer, format, args) catch unreachable;
 }
 
-const Options = struct {
-    flags: Block.Flags = .{},
-    str: ?[]const u8 = null,
-};
-
-pub fn blk(options: Options) *Block {
+pub fn blk(options: Block.Options) *Block {
     const frame_chunks = local.frameChunks();
     const chunks = local.chunks.allocator();
 
@@ -307,7 +408,7 @@ pub fn blk(options: Options) *Block {
         const str = options.str orelse break :bkl null;
         const key = keyFromString(getSeed(), str) orelse break :bkl null;
 
-        if (local.cache.get(key)) |c| {
+        if (local.block_cache.get(key)) |c| {
             const block: *Block = @fieldParentPtr("cached", c);
 
             if (block.touched_frame == local.frame) {
@@ -322,7 +423,7 @@ pub fn blk(options: Options) *Block {
             block.* = .empty;
             block.key = key;
 
-            local.cache.insert(key, &block.cached);
+            local.block_cache.insert(key, &block.cached);
             break :bkl block;
         }
     };
@@ -336,28 +437,6 @@ pub fn blk(options: Options) *Block {
 
     block.build(local, options.flags);
 
-    blkComplete(block);
-
-    if (options.str) |str| {
-        if (block.flags.text) setDisplayString(block, str);
-    }
-
-    return block;
-}
-
-pub fn blkEnd() void {
-    const block = local.stacks.get(.parent).head.?.value;
-    if (block.flags.padding) {
-        const value = local.stacks.get(.padding).head.?.value;
-        spacer(value.@"0", value.@"1");
-
-        popAttr(.padding);
-    }
-
-    popAttr(.parent);
-}
-
-fn blkComplete(block: *Block) void {
     inline for (@typeInfo(Stacks.Field).@"enum".field_values) |value| {
         const flag = @as(u64, 1) << value;
         if (local.pop_flags & flag != 0) {
@@ -374,6 +453,26 @@ fn blkComplete(block: *Block) void {
     }
 
     local.block_count += 1;
+
+    if (block.flags.text) {
+        if (options.str) |str| setDisplayString(block, str);
+    }
+
+    if (block.flags.animate) assert(block.key != null);
+
+    return block;
+}
+
+pub fn blkEnd() void {
+    const block = local.stacks.get(.parent).head.?.value;
+    if (block.flags.padding) {
+        const value = local.stacks.get(.padding).head.?.value;
+        spacer(value.@"0", value.@"1");
+
+        popAttr(.padding);
+    }
+
+    popAttr(.parent);
 }
 
 pub fn pushAttr(attr: Attribute) void {
@@ -514,6 +613,7 @@ pub fn button(str: []const u8) Signal {
         .flags = .{
             .mouse = true,
             .text = true,
+            .animate = true,
         },
     });
     blkEnd();
@@ -566,27 +666,47 @@ fn stackFlag(field: StackField) u64 {
     return @as(u64, 1) << @backingInt(field);
 }
 
-const Cache = HashTable(
-    u64,
-    Cached,
-    struct {
+const Animation = struct {
+    next: ?*Animation = null,
+    prev: ?*Animation = null,
+    cached: Cached = .{},
+    initial: f32,
+    target: f32,
+    kind: AnimationKind,
+    current: f32,
+    first_frame: u64,
+    last_frame: u64,
+    key: u64,
+
+    pub const Options = struct {
+        initial: f32,
+        target: f32,
+        kind: AnimationKind,
+        reset: bool = false,
+    };
+
+    pub const Context = struct {
         pub fn hash(_: @This(), k: u64) u64 {
             return k;
         }
         pub fn eql(_: @This(), k: u64, cached: *Cached) bool {
-            const block: *Block = @fieldParentPtr("cached", cached);
-            return k == block.key;
+            const animation: *Animation = @fieldParentPtr("cached", cached);
+            return k == animation.key;
         }
+    };
+};
+
+pub const AnimationKind = union(enum) {
+    exponential: f32,
+    easing: struct {
+        duration: f32,
+        cubic_bezier: [4]f32,
     },
-);
+};
 
 const Cached = struct {
-    pub const _null: Cached = .{
-        .next = null,
-        .prev = null,
-    };
-    next: ?*Cached,
-    prev: ?*Cached,
+    next: ?*Cached = null,
+    prev: ?*Cached = null,
 };
 
 pub const TextAlign = enum { left, center, right };
@@ -652,6 +772,11 @@ pub const Block = struct {
     rect: [2][2]f32,
     bounds: [2]f32,
 
+    pub const Options = struct {
+        flags: Flags = .{},
+        str: ?[]const u8 = null,
+    };
+
     pub const Flags = packed struct {
         overflow: u2 = 0,
         mouse: bool = false,
@@ -659,9 +784,20 @@ pub const Block = struct {
         border: bool = false,
         padding: bool = false,
         text: bool = false,
+        animate: bool = false,
     };
 
     const FlagBits = @typeInfo(Flags).@"struct".backing_integer.?;
+
+    pub const Context = struct {
+        pub fn hash(_: @This(), k: u64) u64 {
+            return k;
+        }
+        pub fn eql(_: @This(), k: u64, cached: *Cached) bool {
+            const block: *Block = @fieldParentPtr("cached", cached);
+            return k == block.key;
+        }
+    };
 
     pub const empty: Block = .{
         .text_padding = 0.0,
@@ -671,7 +807,7 @@ pub const Block = struct {
         .font_family = 0,
         .font_size = 0.0,
         .rect = @splat(@splat(0.0)),
-        .cached = ._null,
+        .cached = .{},
         .children = .empty,
         .child_count = 0,
         .next = null,
