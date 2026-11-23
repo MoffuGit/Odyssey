@@ -22,8 +22,6 @@ const Window = win.Window;
 
 const log = std.log.scoped(.view);
 
-pub const HOT_ANIMATION = "@@@hot_animation";
-
 threadlocal var local: *View = undefined;
 
 pub const View = struct {
@@ -34,6 +32,7 @@ pub const View = struct {
     root: ?*Block,
 
     frame: u64,
+    frame_t: f32,
     frame_arenas: [2]heap.ArenaAllocator,
     frame_chunks: [2]chunk_pool.ChunkAllocator,
 
@@ -48,6 +47,7 @@ pub const View = struct {
 
     pub fn init(self: *View, gpa: Allocator) !void {
         self.* = .{
+            .frame_t = 0,
             .active = null,
             .hot = null,
             .events = .empty,
@@ -113,8 +113,10 @@ pub fn begin(view: *View, window: Window, resize: bool, fnt: u64) void {
 
     const chunks = local.chunks.allocator();
 
+    const monitor = window.monitor();
     const window_size = window.size() catch .{ 0.0, 0.0 };
 
+    local.frame_t = 1.0 / monitor.refreshRate();
     local.root = null;
     local.stacks = .empty;
     local.pop_flags = 0;
@@ -165,26 +167,6 @@ pub fn finish() void {
             if (block.touched_frame != local.frame) {
                 iter.remove();
                 chunks.destroy(block);
-            }
-        }
-    }
-
-    {
-        var iter = local.block_cache.iterator();
-        while (iter.next()) |cached| {
-            const block: *Block = @fieldParentPtr("cached", cached);
-            const key = block.key orelse unreachable;
-
-            if (block.flags.animate) {
-                const is_hot = local.hot == key;
-
-                const target: f32 = if (is_hot) 1.0 else 0.0;
-
-                _ = animate(keyFromString(key, HOT_ANIMATION) orelse unreachable, .{
-                    .initial = 0.0,
-                    .target = target,
-                    .kind = .{ .exponential = 0.2 },
-                });
             }
         }
     }

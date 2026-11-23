@@ -261,14 +261,6 @@ pub fn render() !void {
                         cursor_x += piece.advance_x;
                         cursor_y += piece.advance_y;
                     }
-
-                    if (flags.animate) {
-                        const key = block.key orelse unreachable;
-                        const hot_key = view.keyFromString(key, view.HOT_ANIMATION) orelse unreachable;
-                        const hot_sample = view.sample(hot_key) orelse unreachable;
-
-                        log.info("hot animation: {}", .{hot_sample});
-                    }
                 }
             }
 

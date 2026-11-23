@@ -84,6 +84,10 @@ pub const Monitor = monitor: {
 
             return .{ x, y };
         }
+
+        pub fn refreshRate(self: @This()) f32 {
+            return self.ptr.?.mode.refreshRate;
+        }
     };
 };
 
@@ -153,7 +157,7 @@ pub const Window = window: {
             }
         }
 
-        pub fn monitor(self: *const @This()) !Monitor {
+        pub fn monitor(self: *const @This()) Monitor {
             const ptr = rgfw.RGFW_window_getMonitor(self.ptr);
 
             return .{ .ptr = ptr };
