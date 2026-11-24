@@ -274,7 +274,7 @@ pub fn setDisplayString(block: *Block, str: []const u8) void {
 pub fn signal(block: *Block) Signal {
     const flags = block.flags;
 
-    var _signal: Signal = .none;
+    var sign: Signal = .none;
 
     const mouse = local.mouse;
     const rect = block.rect;
@@ -294,7 +294,7 @@ pub fn signal(block: *Block) Signal {
                     consumed = true;
                     local.hot = block.key;
                     local.active = block.key;
-                    _signal.mouse_pressed = true;
+                    sign.mouse_pressed = true;
                 }
 
                 if (flags.mouse and
@@ -303,8 +303,8 @@ pub fn signal(block: *Block) Signal {
                 {
                     consumed = true;
                     local.active = null;
-                    _signal.mouse_released = true;
-                    if (in_bounds) _signal.clicked = true else local.hot = null;
+                    sign.mouse_released = true;
+                    if (in_bounds) sign.clicked = true else local.hot = null;
                 }
             },
             else => unreachable,
@@ -317,15 +317,20 @@ pub fn signal(block: *Block) Signal {
         (local.hot == null or local.hot == block.key) and
         (local.active == null or local.active == block.key))
     {
-        _signal.hovered = true;
+        sign.hovered = true;
         local.hot = block.key;
     }
 
     if (in_bounds) {
-        _signal.mouse_over = true;
+        sign.mouse_over = true;
     }
 
-    return _signal;
+    if (block.key) |key| {
+        sign.hot = key == local.hot;
+        sign.active = key == local.active;
+    }
+
+    return sign;
 }
 
 pub fn animate(key: u64, opts: Animation.Options) f32 {
@@ -717,13 +722,17 @@ pub const Sizing = union(enum) {
 
 pub const Signal = packed struct {
     const none: @This() = .{
+        .hot = false,
         .hovered = false,
         .mouse_over = false,
         .mouse_pressed = false,
         .mouse_released = false,
         .clicked = false,
+        .active = false,
     };
 
+    hot: bool,
+    active: bool,
     hovered: bool,
     mouse_over: bool,
     mouse_pressed: bool,
@@ -869,6 +878,9 @@ pub const Block = struct {
         self.sizing = @splat(.none);
         self.shrink = @splat(0.0);
         self.color = @splat(0.0);
+        self.border = @splat(0.0);
+        self.radius = @splat(0.0);
+        self.scale = 1.0;
         self.flags = .{};
         self.string = null;
         self.run = null;
