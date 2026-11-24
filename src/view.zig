@@ -535,6 +535,10 @@ pub fn textPadding(value: f32) void {
     nextAttr(.{ .text_padding = value });
 }
 
+pub fn scale(value: f32) void {
+    nextAttr(.{ .scale = value });
+}
+
 pub fn size(sizing: Sizing) void {
     width(sizing);
     height(sizing);
@@ -640,6 +644,7 @@ pub const Attribute = union(enum) {
     text_color: [4]f32,
     text_align: TextAlign,
     text_padding: f32,
+    scale: f32,
 };
 
 const Stacks = TaggedLinkedList(Attribute);
@@ -739,6 +744,7 @@ pub const Block = struct {
     touched_frame: u64,
 
     axis: Axis,
+    scale: f32,
     sizing: [2]Sizing,
     shrink: [2]f32,
     color: [4]f32,
@@ -787,6 +793,7 @@ pub const Block = struct {
     };
 
     pub const empty: Block = .{
+        .scale = 1.0,
         .text_padding = 0.0,
         .text_align = .left,
         .run = null,
@@ -830,6 +837,7 @@ pub const Block = struct {
         if (view.stacks.get(.font_size).head) |node| self.font_size = node.value;
         if (view.stacks.get(.font_family).head) |node| self.font_family = node.value;
         if (view.stacks.get(.text_color).head) |node| self.text_color = node.value;
+        if (view.stacks.get(.scale).head) |node| self.scale = node.value;
         if (view.stacks.get(.text_align).head) |node| self.text_align = node.value;
         if (view.stacks.get(.text_padding).head) |node| self.text_padding = node.value;
         if (view.stacks.get(.width_shrink).head) |node| self.shrink[0] = clamp(node.value, 0.0, 1.0);
@@ -1039,6 +1047,14 @@ pub const Block = struct {
             }
 
             current.bounds[axis] = bounds;
+
+            if (current.scale != 1.0) {
+                const center = (current.rect[0][axis] + current.rect[1][axis]) * 0.5;
+                const half_size = (current.rect[1][axis] - current.rect[0][axis]) * 0.5 * current.scale;
+
+                current.rect[0][axis] = @floor(center - half_size);
+                current.rect[1][axis] = @floor(center + half_size);
+            }
         }
     }
 };
