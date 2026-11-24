@@ -223,27 +223,37 @@ pub fn render() !void {
                     });
                 }
 
-                if (block.run) |r| {
-                    var cursor_x, var cursor_y = view.textPosition(block);
+                bkl: {
+                    const pieces = if (block.run) |r| r.pieces else break :bkl;
+                    var cursor_x, var cursor_y = view.textPosition(block) orelse break :bkl;
 
-                    for (r.pieces) |piece| {
-                        const x = cursor_x + piece.offset_x + piece.off_x;
-                        const y = cursor_y + piece.offset_y + piece.off_y;
+                    for (pieces) |piece| {
+                        const glyph = font.getGlyph(
+                            piece.tag,
+                            piece.index,
+                            block.font_size,
+                        ) catch continue;
 
-                        const width: f32 = @floatFromInt(piece.width);
-                        const height: f32 = @floatFromInt(piece.height);
+                        const x: f32 = cursor_x + piece.offset_x + glyph.off_x;
+                        const y: f32 = cursor_y + piece.offset_y + glyph.off_y;
 
-                        const position: [4]f32 = if (piece.rotate) .{
-                            @floatFromInt(piece.x),
-                            @floatFromInt(piece.y),
-                            @floatFromInt(piece.x + piece.height),
-                            @floatFromInt(piece.y + piece.width),
-                        } else .{
-                            @floatFromInt(piece.x),
-                            @floatFromInt(piece.y),
-                            @floatFromInt(piece.x + piece.width),
-                            @floatFromInt(piece.y + piece.height),
+                        const width: f32 = @floatFromInt(glyph.width);
+                        const height: f32 = @floatFromInt(glyph.height);
+
+                        var position: [4]f32 = .{
+                            @floatFromInt(glyph.x),
+                            @floatFromInt(glyph.y),
+                            @floatFromInt(glyph.x),
+                            @floatFromInt(glyph.y),
                         };
+
+                        if (glyph.rotate) {
+                            position[2] += @floatFromInt(glyph.height);
+                            position[3] += @floatFromInt(glyph.width);
+                        } else {
+                            position[2] += @floatFromInt(glyph.width);
+                            position[3] += @floatFromInt(glyph.height);
+                        }
 
                         try frame.rect(.{
                             .position = .{ x, y, x + width, y + height },
@@ -254,7 +264,7 @@ pub fn render() !void {
                             .src_position = position,
                             .style = .{
                                 .omit_src = 0.0,
-                                .rotate_src = if (piece.rotate) 1.0 else 0.0,
+                                .rotate_src = if (glyph.rotate) 1.0 else 0.0,
                             },
                         });
 

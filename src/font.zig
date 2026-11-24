@@ -142,13 +142,13 @@ pub fn addCollection(tags: []const Tag) !u64 {
     return key;
 }
 
-pub fn metrics(key: u64, size: f32) !Metrics {
-    const collection = cache.collections.get(key) orelse return error.MissingCollection;
+pub fn metrics(key: u64, size: f32) ?Metrics {
+    const collection = cache.collections.get(key) orelse return null;
     var iter = collection.tags.iterator();
     while (iter.next()) |item| {
         const font = cache.fonts.get(item.tag.font_hash) orelse continue;
         if (font.status == .invalid) continue;
-        const scale = font.ttf.scaleForPixelHeight(size);
+        const scale = font.scale(size);
         return .{
             .ascent = font.metrics.ascent * scale,
             .descent = font.metrics.descent * scale,
@@ -156,7 +156,7 @@ pub fn metrics(key: u64, size: f32) !Metrics {
         };
     }
 
-    return error.InvalidCollection;
+    return null;
 }
 
 pub fn run(key: u64, size: f32, str: []const u8) !Run {
@@ -175,26 +175,20 @@ pub fn run(key: u64, size: f32, str: []const u8) !Run {
     var kb_run: kb.kbts_run = undefined;
     while (context.ShapeRun(&kb_run) != 0) {
         const font: *Font = @ptrCast(@alignCast(kb_run.Font.*.UserData));
-        const scale = font.ttf.scaleForPixelHeight(size);
+        const scale = font.scale(size);
 
         var kb_glyph: [*c]kb.kbts_glyph = undefined;
         while (kb_run.Glyphs.GlyphIteratorNext(&kb_glyph) != 0) {
-            const glyph = try getGlyph(font.tag, kb_glyph.*.Id, size);
             const advance_x: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.AdvanceX)));
             const advance_y: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.AdvanceY)));
             const offset_x: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.OffsetX)));
             const offset_y: f32 = @floatFromInt(@as(i32, @intCast(kb_glyph.*.OffsetY)));
 
             const piece: Piece = .{
-                .rotate = glyph.rotate,
-                .width = glyph.width,
-                .height = glyph.height,
-                .off_x = glyph.off_x,
-                .off_y = glyph.off_y,
+                .tag = font.tag,
+                .index = kb_glyph.*.Id,
                 .offset_x = offset_x * scale,
                 .offset_y = offset_y * scale,
-                .x = glyph.x,
-                .y = glyph.y,
                 .advance_x = advance_x * scale,
                 .advance_y = advance_y * scale,
             };
@@ -228,7 +222,7 @@ pub fn getGlyph(tag: Tag, index: u16, size: f32) !Glyph {
 
     const arena = cache.arena.allocator();
 
-    const scale = font.ttf.scaleForPixelHeight(size);
+    const scale = font.scale(size);
     defer cache.buffer.clearRetainingCapacity();
     const bitmap = try font.ttf.glyphBitmap(cache.gpa, &cache.buffer, @fromBackingInt(index), scale, scale);
 
@@ -361,6 +355,10 @@ const Font = struct {
         };
 
         try self.glyphs.init(1028, .{}, arena);
+    }
+
+    pub fn scale(self: *const @This(), size: f32) f32 {
+        return size / (self.metrics.ascent - self.metrics.descent);
     }
 
     pub const Context = struct {
@@ -500,15 +498,10 @@ const Glyph = struct {
 };
 
 const Piece = struct {
-    rotate: bool,
-    width: u32,
-    height: u32,
-    off_x: i16,
-    off_y: i16,
+    tag: Tag,
+    index: u16,
     offset_x: f32,
     offset_y: f32,
-    x: u32,
-    y: u32,
     advance_x: f32,
     advance_y: f32,
 };

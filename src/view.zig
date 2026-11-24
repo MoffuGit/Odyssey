@@ -226,9 +226,9 @@ pub fn keyFromString(seed: u64, str: []const u8) ?u64 {
     return key;
 }
 
-pub fn textPosition(block: *Block) struct { f32, f32 } {
-    const metrics = font.metrics(block.font_family, block.font_size) catch return .{ 0.0, 0.0 };
-    const dim = if (block.run) |run| run.dimensions else return .{ 0.0, 0.0 };
+pub fn textPosition(block: *Block) ?struct { f32, f32 } {
+    const metrics = font.metrics(block.font_family, block.font_size) orelse return null;
+    const dim = if (block.run) |run| run.dimensions else return null;
 
     var position: [2]f32 = @splat(0.0);
     position[1] = @floor((block.rect[0][1] + block.rect[1][1]) / 2.0 + (metrics.ascent / 2.0 + metrics.descent / 2.0));
@@ -1048,13 +1048,11 @@ pub const Block = struct {
 
             current.bounds[axis] = bounds;
 
-            if (current.scale != 1.0) {
-                const center = (current.rect[0][axis] + current.rect[1][axis]) * 0.5;
-                const half_size = (current.rect[1][axis] - current.rect[0][axis]) * 0.5 * current.scale;
+            const center = (current.rect[0][axis] + current.rect[1][axis]) * 0.5;
+            const half_size = (current.rect[1][axis] - current.rect[0][axis]) * 0.5 * current.scale;
 
-                current.rect[0][axis] = @floor(center - half_size);
-                current.rect[1][axis] = @floor(center + half_size);
-            }
+            current.rect[0][axis] = @floor(center - half_size);
+            current.rect[1][axis] = @floor(center + half_size);
         }
     }
 };
