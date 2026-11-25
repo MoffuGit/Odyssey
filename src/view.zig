@@ -225,7 +225,7 @@ pub fn keyFromString(seed: u64, str: []const u8) ?u64 {
     return key;
 }
 
-pub fn textPosition(block: *Block) ?struct { f32, f32 } {
+pub fn textPosition(block: *Block) struct { f32, f32 } {
     var position: [2]f32 = @splat(0.0);
     position[1] = @floor((block.rect[0][1] + block.rect[1][1]) / 2.0 + (block.text_dim.ascent / 2.0 + block.text_dim.descent / 2.0));
 

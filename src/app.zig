@@ -219,10 +219,10 @@ pub fn render() !void {
                     });
                 }
 
-                bkl: {
-                    const pieces = if (block.run) |r| r.pieces else break :bkl;
+                if (block.run) |r| {
+                    const pieces = r.pieces;
                     const font_size = block.font_size * block.scale;
-                    var cursor_x, var cursor_y = view.textPosition(block) orelse break :bkl;
+                    var cursor_x, var cursor_y = view.textPosition(block);
 
                     for (pieces) |piece| {
                         const glyph = font.getGlyph(piece.tag, piece.index, font_size) catch continue;
