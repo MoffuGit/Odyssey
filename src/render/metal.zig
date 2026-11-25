@@ -39,14 +39,11 @@ device: objc.Object,
 queue: objc.Object,
 shaders: Shaders,
 
-autorelease_pool: ?*objc.AutoreleasePool,
-
 pub fn init(self: *Metal) !void {
     self.* = .{
         .shaders = undefined,
         .device = undefined,
         .queue = undefined,
-        .autorelease_pool = null,
     };
 
     var chosen_device: ?objc.Object = null;
@@ -71,7 +68,6 @@ pub fn init(self: *Metal) !void {
 }
 
 pub fn deinit(self: *Metal) void {
-    if (self.autorelease_pool) |pool| pool.deinit();
     self.shaders.deinit();
     self.queue.release();
     self.device.release();
@@ -110,17 +106,6 @@ pub fn texture(self: *Metal, width: usize, height: usize, data: ?[]const u8) !Te
             },
         },
     );
-}
-
-pub fn start(self: *Metal) void {
-    assert(self.autorelease_pool == null);
-    self.autorelease_pool = .init();
-}
-
-pub fn end(self: *Metal) void {
-    assert(self.autorelease_pool != null);
-    self.autorelease_pool.?.deinit();
-    self.autorelease_pool = null;
 }
 
 pub fn frame(self: *Metal, handle: *Handle) Frame {

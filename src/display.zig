@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 
 const macos = @import("macos");
+const objc = @import("objc");
 
 const async = @import("async.zig");
 
@@ -28,6 +29,9 @@ pub fn init(self: *Display, comptime function: *const fn () bool, io: Io) !void 
     const Callback = struct {
         pub fn callback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool {
             res catch unreachable;
+
+            const pool = objc.AutoreleasePool.init();
+            defer pool.deinit();
 
             return @call(.always_inline, function, .{});
         }

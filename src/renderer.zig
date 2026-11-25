@@ -49,9 +49,6 @@ pub fn deinit() void {
 
 //The sync path i take it from this issue: https://github.com/ocornut/imgui/issues/9500
 pub fn render(handle: *Handle, frame_state: *FrameState, sync: bool) void {
-    renderer.start();
-    defer renderer.end();
-
     const width, const height = frame_state.uniforms.viewport_size;
 
     var target = handle.context.target(width, height, sync);
