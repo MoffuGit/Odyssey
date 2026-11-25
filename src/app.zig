@@ -187,10 +187,6 @@ pub fn render() !void {
                 .viewport_size = try window_state.win.size(),
             };
 
-            if (frame.atlas_generation != font.cache.atlas_gen) {
-                try frame.syncAtlas(&font.cache.atlas);
-            }
-
             var node = window_state.view.root;
             while (node) |block| : (node = block.nextPre()) {
                 const rect = block.rect[0] ++ block.rect[1];
@@ -225,10 +221,11 @@ pub fn render() !void {
 
                 bkl: {
                     const pieces = if (block.run) |r| r.pieces else break :bkl;
+                    const font_size = block.font_size * block.scale;
                     var cursor_x, var cursor_y = view.textPosition(block) orelse break :bkl;
 
                     for (pieces) |piece| {
-                        const glyph = font.getGlyph(piece.tag, piece.index, block.font_size) catch continue;
+                        const glyph = font.getGlyph(piece.tag, piece.index, font_size) catch continue;
 
                         const x: f32 = cursor_x + (piece.offset_x * glyph.scale) + glyph.off_x;
                         const y: f32 = cursor_y + (piece.offset_y * glyph.scale) + glyph.off_y;
@@ -268,6 +265,10 @@ pub fn render() !void {
                         cursor_y += piece.advance_y * glyph.scale;
                     }
                 }
+            }
+
+            if (frame.atlas_generation != font.cache.atlas_gen) {
+                try frame.syncAtlas(&font.cache.atlas);
             }
 
             renderer.render(&window_state.handle, frame, window_state.resize);
