@@ -1,14 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
-const debug = std.debug;
-const assert = debug.assert;
+const assert = std.debug.assert;
 const Allocator = mem.Allocator;
 const testing = std.testing;
-const panic = debug.panic;
 const atomic = std.atomic;
-const builtin = @import("builtin");
 const math = std.math;
 const Io = std.Io;
+const builtin = @import("builtin");
 
 const log = std.log.scoped(.chunk_pool);
 
@@ -135,12 +133,14 @@ fn lessThan(_: void, lhs: Options, rhs: Options) bool {
 
 pub const ChunkAllocator = struct {
     pools: []ChunkPool,
+    child_alloc: Allocator,
     io: Io,
 
     pub fn init(self: *ChunkAllocator, child_alloc: Allocator, opts: []const Options) !void {
         self.* = .{
             .pools = undefined,
             .io = undefined,
+            .child_alloc = child_alloc,
         };
 
         self.pools = try child_alloc.alloc(ChunkPool, opts.len);
@@ -179,9 +179,9 @@ pub const ChunkAllocator = struct {
         self.io = io;
     }
 
-    pub fn deinit(self: *ChunkAllocator, child_alloc: Allocator) void {
-        for (self.pools) |*pool| pool.deinit(child_alloc);
-        child_alloc.free(self.pools);
+    pub fn deinit(self: *ChunkAllocator) void {
+        for (self.pools) |*pool| pool.deinit(self.child_alloc);
+        self.child_alloc.free(self.pools);
     }
 
     pub fn allocator(self: *ChunkAllocator) Allocator {
@@ -312,7 +312,7 @@ test "Chunk Allocator" {
 
     var chunk_allocator: ChunkAllocator = undefined;
     try chunk_allocator.init(gpa, &.{ .{ .capacity = 1, .chunk_size = 64 }, .{ .capacity = 1, .chunk_size = 128 } });
-    defer chunk_allocator.deinit(gpa);
+    defer chunk_allocator.deinit();
 
     const alloc = chunk_allocator.allocator();
     const small = try alloc.create(Small);
@@ -336,7 +336,7 @@ test "Chunk Allocator orders chunk sizes from smallest to biggest" {
 
     var chunk_allocator: ChunkAllocator = undefined;
     try chunk_allocator.init(gpa, &.{ .{ .capacity = 1, .chunk_size = 128 }, .{ .capacity = 1, .chunk_size = 64 }, .{ .capacity = 1, .chunk_size = 256 } });
-    defer chunk_allocator.deinit(gpa);
+    defer chunk_allocator.deinit();
 
     try testing.expectEqual(@as(u32, 64), chunk_allocator.pools[0].chunk_size);
     try testing.expectEqual(@as(u32, 128), chunk_allocator.pools[1].chunk_size);
