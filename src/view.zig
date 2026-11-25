@@ -227,19 +227,16 @@ pub fn keyFromString(seed: u64, str: []const u8) ?u64 {
 }
 
 pub fn textPosition(block: *Block) ?struct { f32, f32 } {
-    const metrics = font.metrics(block.font_family, block.font_size) orelse return null;
-    const dim = if (block.run) |run| run.dimensions else return null;
-
     var position: [2]f32 = @splat(0.0);
-    position[1] = @floor((block.rect[0][1] + block.rect[1][1]) / 2.0 + (metrics.ascent / 2.0 + metrics.descent / 2.0));
+    position[1] = @floor((block.rect[0][1] + block.rect[1][1]) / 2.0 + (block.text_dim.ascent / 2.0 + block.text_dim.descent / 2.0));
 
     switch (block.text_align) {
         .left => position[0] = block.rect[0][0] + block.text_padding,
         .center => {
-            position[0] = @trunc((block.rect[0][0] + block.rect[1][0]) / 2.0 - dim[0] / 2.0);
+            position[0] = @trunc((block.rect[0][0] + block.rect[1][0]) / 2.0 - block.text_dim.size[0] / 2.0);
         },
         .right => {
-            position[0] = @trunc(block.rect[1][0] - dim[0] - block.text_padding);
+            position[0] = @trunc(block.rect[1][0] - block.text_dim.size[0] - block.text_padding);
             position[0] = std.math.clamp(position[0], block.rect[0][0], block.rect[1][0]);
         },
     }
@@ -261,14 +258,13 @@ pub fn setDisplayString(block: *Block, str: []const u8) void {
     block.string = dupe;
     if (display.len == 0) return;
 
-    block.run = font.run(
-        block.font_family,
-        block.font_size,
-        display,
-    ) catch |err| {
+    const run = font.run(block.font_family, display) catch |err| {
         log.err("Run err={}", .{err});
         return;
     };
+
+    block.run = run;
+    block.text_dim = font.dimension(run.pieces, block.font_size);
 }
 
 pub fn signal(block: *Block) Signal {
@@ -768,6 +764,7 @@ pub const Block = struct {
     text_padding: f32,
     string: ?[]const u8,
     run: ?Run,
+    text_dim: font.Dimension,
 
     size: [2]f32,
     position: [2]f32,
@@ -802,6 +799,7 @@ pub const Block = struct {
     };
 
     pub const empty: Block = .{
+        .text_dim = .{},
         .scale = 1.0,
         .text_padding = 0.0,
         .text_align = .left,
@@ -874,6 +872,11 @@ pub const Block = struct {
         self.prev = null;
         self.parent = null;
 
+        self.text_dim = .{};
+        self.text_padding = 0.0;
+        self.text_align = .left;
+        self.text_color = @splat(0.0);
+        self.thickness = 0.0;
         self.axis = .x;
         self.sizing = @splat(.none);
         self.shrink = @splat(0.0);
@@ -921,8 +924,7 @@ pub const Block = struct {
             switch (current.sizing[axis]) {
                 .fixed => |fixed| current.size[axis] = fixed,
                 .text => |base| {
-                    const dim = if (current.run) |run| run.dimensions else .{ 0.0, 0.0 };
-                    current.size[axis] = base + dim[axis] + current.text_padding * 2;
+                    current.size[axis] = base + current.text_dim.size[axis] + current.text_padding * 2;
                 },
                 else => {},
             }

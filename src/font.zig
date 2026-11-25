@@ -142,27 +142,10 @@ pub fn addCollection(tags: []const Tag) !u64 {
     return key;
 }
 
-pub fn metrics(key: u64, size: f32) ?Metrics {
-    const collection = cache.collections.get(key) orelse return null;
-    var iter = collection.tags.iterator();
-    while (iter.next()) |item| {
-        const font = cache.fonts.get(item.tag.font_hash) orelse continue;
-        if (font.status == .invalid) continue;
-        const scale = font.scale(size);
-        return .{
-            .ascent = font.metrics.ascent * scale,
-            .descent = font.metrics.descent * scale,
-            .line_gap = font.metrics.line_gap * scale,
-        };
-    }
-
-    return null;
-}
-
-pub fn run(key: u64, size: f32, str: []const u8) !Run {
+pub fn run(key: u64, str: []const u8) !Run {
     const collection = cache.collections.get(key) orelse return error.MissingCollection;
 
-    if (collection.runs.get(.{ .str = str, .size = size })) |cached| return cached.*;
+    if (collection.runs.get(str)) |cached| return cached.*;
 
     const context = collection.context;
     context.ShapeBegin(kb.KBTS_DIRECTION_DONT_KNOW, kb.KBTS_LANGUAGE_ENGLISH);
@@ -171,11 +154,9 @@ pub fn run(key: u64, size: f32, str: []const u8) !Run {
 
     const arena = cache.arena.allocator();
 
-    var dimensions: [2]f32 = @splat(0.0);
     var kb_run: kb.kbts_run = undefined;
     while (context.ShapeRun(&kb_run) != 0) {
         const font: *Font = @ptrCast(@alignCast(kb_run.Font.*.UserData));
-        const scale = font.scale(size);
 
         var kb_glyph: [*c]kb.kbts_glyph = undefined;
         while (kb_run.Glyphs.GlyphIteratorNext(&kb_glyph) != 0) {
@@ -187,42 +168,39 @@ pub fn run(key: u64, size: f32, str: []const u8) !Run {
             const piece: Piece = .{
                 .tag = font.tag,
                 .index = kb_glyph.*.Id,
-                .offset_x = offset_x * scale,
-                .offset_y = offset_y * scale,
-                .advance_x = advance_x * scale,
-                .advance_y = advance_y * scale,
+                .offset_x = offset_x,
+                .offset_y = offset_y,
+                .advance_x = advance_x,
+                .advance_y = advance_y,
+                .ascent = font.metrics.ascent,
+                .descent = font.metrics.descent,
             };
 
             try cache.piece_buffer.append(cache.gpa, piece);
-
-            dimensions[0] += piece.advance_x;
-            dimensions[1] = @max(dimensions[1], piece.advance_y);
         }
     }
 
     const new = try arena.create(Run);
     new.* = .{
-        .dimensions = dimensions,
         .str = try arena.dupe(u8, str),
         .pieces = try arena.dupe(Piece, cache.piece_buffer.items),
-        .size = size,
     };
-    collection.runs.insert(.{ .str = new.str, .size = size }, new);
+    collection.runs.insert(new.str, new);
     cache.piece_buffer.clearRetainingCapacity();
 
     return new.*;
 }
 
-pub fn getGlyph(tag: Tag, index: u16, size: f32) !Glyph {
+pub fn getGlyph(tag: Tag, index: u16, font_size: f32) !Glyph {
     const font = cache.fonts.get(tag.font_hash) orelse return error.MissingFont;
 
     if (font.status == .invalid) return error.InvalidFont;
 
-    if (font.glyphs.get(.{ .index = index, .size = size })) |glyph| return glyph.*;
+    if (font.glyphs.get(.{ .index = index, .font_size = font_size })) |glyph| return glyph.*;
 
     const arena = cache.arena.allocator();
 
-    const scale = font.scale(size);
+    const scale = font.scale(font_size);
     defer cache.buffer.clearRetainingCapacity();
     const bitmap = try font.ttf.glyphBitmap(cache.gpa, &cache.buffer, @fromBackingInt(index), scale, scale);
 
@@ -255,7 +233,8 @@ pub fn getGlyph(tag: Tag, index: u16, size: f32) !Glyph {
     const glyph = try arena.create(Glyph);
 
     glyph.* = .{
-        .size = size,
+        .scale = scale,
+        .font_size = font_size,
         .index = index,
         .width = bitmap.width,
         .height = bitmap.height,
@@ -387,6 +366,28 @@ pub fn readFile(abs_path: []const u8, arena: Allocator, io: Io) ![]u8 {
     return buffer;
 }
 
+pub fn dimension(pieces: []const Piece, height: f32) Dimension {
+    var size: [2]f32 = @splat(0.0);
+    var ascent: f32 = 0.0;
+    var descent: f32 = 0.0;
+
+    for (pieces) |piece| {
+        const glyph = getGlyph(piece.tag, piece.index, height) catch continue;
+        size[0] += piece.advance_x * glyph.scale;
+        size[1] = @max(size[1], piece.advance_y * glyph.scale);
+        ascent = @max(ascent, piece.ascent * glyph.scale);
+        descent = @min(descent, piece.descent * glyph.scale);
+    }
+
+    return .{ .ascent = ascent, .descent = descent, .size = size };
+}
+
+pub const Dimension = struct {
+    size: [2]f32 = @splat(0.0),
+    ascent: f32 = 0.0,
+    descent: f32 = 0.0,
+};
+
 pub const Status = union(enum) {
     loaded,
     invalid,
@@ -462,7 +463,7 @@ const Glyph = struct {
     prev: ?*Glyph = null,
 
     index: u16,
-    size: f32,
+    font_size: f32,
     rotate: bool,
     width: u32,
     height: u32,
@@ -470,24 +471,25 @@ const Glyph = struct {
     off_y: i16,
     x: u32,
     y: u32,
+    scale: f32,
 
     pub fn key(self: *const Glyph) Key {
         return .{
             .index = self.index,
-            .size = self.size,
+            .font_size = self.font_size,
         };
     }
 
     const Key = struct {
         index: u16,
-        size: f32,
+        font_size: f32,
     };
 
     pub const Context = struct {
         pub fn hash(_: @This(), k: Key) u64 {
             var hasher = std.hash.Wyhash.init(0);
             autoHash(&hasher, k.index);
-            autoHash(&hasher, @as(u32, @bitCast(k.size)));
+            autoHash(&hasher, @as(u32, @bitCast(k.font_size)));
             return hasher.final();
         }
 
@@ -504,31 +506,26 @@ const Piece = struct {
     offset_y: f32,
     advance_x: f32,
     advance_y: f32,
+    ascent: f32,
+    descent: f32,
 };
 
 pub const Run = struct {
-    pub const Key = struct {
-        str: []const u8,
-        size: f32,
-    };
     next: ?*Run = null,
     prev: ?*Run = null,
 
     str: []const u8,
     pieces: []const Piece,
-    size: f32,
-    dimensions: [2]f32,
 
     pub const Context = struct {
-        pub fn hash(_: @This(), k: Key) u64 {
+        pub fn hash(_: @This(), str: []const u8) u64 {
             var hasher = std.hash.Wyhash.init(0);
-            hasher.update(k.str);
-            autoHash(&hasher, @as(u32, @bitCast(k.size)));
+            hasher.update(str);
             return hasher.final();
         }
 
-        pub fn eql(_: @This(), k: Key, v: *Run) bool {
-            return k.size == v.size and std.mem.eql(u8, k.str, v.str);
+        pub fn eql(_: @This(), str: []const u8, v: *Run) bool {
+            return std.mem.eql(u8, str, v.str);
         }
     };
 };
@@ -541,7 +538,7 @@ const Collection = struct {
 
     key: u64,
     tags: SinglyLinkedList(Item),
-    runs: HashTable(Run.Key, Run, Run.Context),
+    runs: HashTable([]const u8, Run, Run.Context),
     context: *kb.kbts_shape_context,
 
     pub fn init(self: *Collection, key: u64, arena: *ArenaAllocator) !void {

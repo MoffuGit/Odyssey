@@ -228,14 +228,10 @@ pub fn render() !void {
                     var cursor_x, var cursor_y = view.textPosition(block) orelse break :bkl;
 
                     for (pieces) |piece| {
-                        const glyph = font.getGlyph(
-                            piece.tag,
-                            piece.index,
-                            block.font_size,
-                        ) catch continue;
+                        const glyph = font.getGlyph(piece.tag, piece.index, block.font_size) catch continue;
 
-                        const x: f32 = cursor_x + piece.offset_x + glyph.off_x;
-                        const y: f32 = cursor_y + piece.offset_y + glyph.off_y;
+                        const x: f32 = cursor_x + (piece.offset_x * glyph.scale) + glyph.off_x;
+                        const y: f32 = cursor_y + (piece.offset_y * glyph.scale) + glyph.off_y;
 
                         const width: f32 = @floatFromInt(glyph.width);
                         const height: f32 = @floatFromInt(glyph.height);
@@ -268,8 +264,8 @@ pub fn render() !void {
                             },
                         });
 
-                        cursor_x += piece.advance_x;
-                        cursor_y += piece.advance_y;
+                        cursor_x += piece.advance_x * glyph.scale;
+                        cursor_y += piece.advance_y * glyph.scale;
                     }
                 }
             }
