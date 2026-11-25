@@ -15,7 +15,6 @@ const HashTable = datastruct.HashTable;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 const TaggedLinkedList = datastruct.TaggedLinkedList;
 const font = @import("font.zig");
-const Run = font.Run;
 const rng2 = @import("math.zig").rng2;
 const win = @import("window.zig");
 const Window = win.Window;
@@ -763,7 +762,7 @@ pub const Block = struct {
     text_align: TextAlign,
     text_padding: f32,
     string: ?[]const u8,
-    run: ?Run,
+    run: ?font.Run,
     text_dim: font.Dimension,
 
     size: [2]f32,
