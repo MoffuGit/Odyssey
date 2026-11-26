@@ -120,7 +120,7 @@ pub const Context = struct {
 
         const CAMetalLayer = objc.getClass("CAMetalLayer").?;
 
-        const layer = CAMetalLayer.msgSend(objc.Object, "layer", .{});
+        const layer = CAMetalLayer.msgSend(objc.Object, "layer", .{}).retain();
         layer.setProperty("device", api.device);
         layer.setProperty("opaque", true);
         layer.setProperty("pixelFormat", @backingInt(c.MTLPixelFormat.bgra8unorm));
