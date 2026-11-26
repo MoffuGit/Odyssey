@@ -3,7 +3,9 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const mem = std.mem;
 const heap = std.heap;
+const math = std.math;
 const assert = std.debug.assert;
 const testing = std.testing;
 const Io = std.Io;
@@ -30,9 +32,6 @@ pub const Renderer = renderer: {
 };
 
 const BufferCount = Renderer.BufferCount;
-const Buffer = Renderer.Buffer;
-const Texture = Renderer.Texture;
-const Context = Renderer.Context;
 const RECT_CAPACITY = PAGE_SIZE / std.math.gcd(PAGE_SIZE, @sizeOf(Rect));
 
 var renderer: Renderer = undefined;
@@ -76,14 +75,14 @@ pub fn render(handle: *Handle, frame_state: *FrameState, sync: bool) void {
             .draw = .{
                 .vertex_count = 4,
                 .type = .triangle_strip,
-                .instance_count = curr.pool.reserved,
+                .instance_count = curr.reserved,
             },
         });
     }
 }
 
 pub fn syncTexture(
-    texture: *Texture,
+    texture: *Renderer.Texture,
     width: usize,
     height: usize,
     data: ?[]const u8,
@@ -103,7 +102,7 @@ pub fn syncTexture(
 
 pub const Handle = struct {
     swap_chain: SwapChain,
-    context: Context,
+    context: Renderer.Context,
 
     pub fn init(self: *@This(), window: *Window, gpa: Allocator, io: Io) !void {
         self.* = .{ .swap_chain = undefined, .context = undefined };
@@ -172,9 +171,9 @@ pub const FrameState = struct {
     rects: BufferList,
 
     uniforms: Uniforms align(PAGE_SIZE),
-    uniform_buffer: Buffer,
+    uniform_buffer: Renderer.Buffer,
 
-    atlas_texture: Texture,
+    atlas_texture: Renderer.Texture,
     atlas_generation: usize,
 
     pub fn init(self: *FrameState, gpa: Allocator) !void {
@@ -208,23 +207,23 @@ pub const FrameState = struct {
 
         const buffer = blk: {
             if (list.nodes.tail) |tail| {
-                if (tail.pool.alloc()) |buffer| break :blk buffer;
+                if (tail.alloc()) |buffer| break :blk buffer;
             }
 
-            if (self.free_rects.nodes.pop()) |node| {
-                list.push(node);
-                break :blk node.pool.alloc() orelse unreachable;
+            if (self.free_rects.nodes.pop()) |pool| {
+                list.push(pool);
+                break :blk pool.alloc() orelse unreachable;
             }
 
-            const node = try arena.create(BufferNode);
-            try node.init(.{
+            const pool = try arena.create(Pool);
+            try pool.init(.{
                 .capacity = RECT_CAPACITY,
-                .chunk_size = @sizeOf(Rect),
+                .size = @sizeOf(Rect),
                 .alignment = .fromByteUnits(PAGE_SIZE),
             }, arena);
-            list.push(node);
+            list.push(pool);
 
-            break :blk node.pool.alloc() orelse unreachable;
+            break :blk pool.alloc() orelse unreachable;
         };
 
         assert(buffer.len == @sizeOf(Rect));
@@ -244,32 +243,64 @@ pub const FrameState = struct {
 
     pub fn reset(self: *FrameState) void {
         var iter = self.rects.nodes.iterator();
-        while (iter.next()) |curr| curr.pool.reset();
+        while (iter.next()) |curr| curr.reset();
 
         self.free_rects.nodes.concatByMoving(&self.rects.nodes);
         self.uniforms = undefined;
     }
 };
 
-pub const BufferNode = struct {
-    next: ?*BufferNode,
-    buffer: Buffer,
-    pool: ChunkPool,
+pub const Pool = struct {
+    next: ?*Pool,
+    buffer: Renderer.Buffer,
+    ptr: [*]u8,
+    reserved: u32,
+    size: u32,
+    len: usize,
 
-    pub fn init(self: *BufferNode, opt: chunk_pool.Options, arena: Allocator) !void {
+    pub const Options = struct {
+        capacity: u32,
+        size: u32,
+        alignment: ?mem.Alignment = null,
+    };
+
+    pub fn init(self: *Pool, opt: Options, arena: Allocator) !void {
+        assert(opt.capacity < math.maxInt(u32));
+        assert(opt.capacity > 0);
+        assert(opt.size > 0);
+
+        const len = @as(usize, opt.size) * @as(usize, opt.capacity);
+        const alignment: mem.Alignment = opt.alignment orelse .fromByteUnits(opt.size);
+        const ptr = arena.rawAlloc(len, alignment, @returnAddress()) orelse return error.OutOfMemory;
+
         self.* = .{
             .next = null,
+            .reserved = 0,
             .buffer = undefined,
-            .pool = undefined,
+            .ptr = ptr,
+            .size = opt.size,
+            .len = len,
         };
 
-        try self.pool.init(arena, opt);
-
-        self.buffer = renderer.buffer(self.pool.ptr, self.pool.len);
+        self.buffer = renderer.buffer(self.ptr, self.len);
     }
 
-    pub fn deinit(self: *BufferNode) void {
+    pub fn deinit(self: *Pool) void {
         self.buffer.deinit();
+    }
+
+    pub fn reset(self: *Pool) void {
+        self.reserved = 0;
+    }
+
+    pub fn alloc(self: *Pool) ?[]u8 {
+        const index = self.reserved;
+        const offset = index * self.size;
+
+        if (offset == self.len) return null;
+        self.reserved += 1;
+
+        return self.ptr[offset .. offset + self.size];
     }
 };
 
@@ -277,9 +308,9 @@ pub const BufferList = struct {
     const empty: BufferList = .{
         .nodes = .empty,
     };
-    nodes: SinglyLinkedList(BufferNode),
+    nodes: SinglyLinkedList(Pool),
 
-    pub fn push(self: *BufferList, node: *BufferNode) void {
+    pub fn push(self: *BufferList, node: *Pool) void {
         self.nodes.append(node);
     }
 
