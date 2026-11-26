@@ -9,73 +9,75 @@ const DoublyLinkedList = datastruct.DoublyLinkedList;
 
 const DELIMITER: u8 = '|';
 
-pub const Properties = @This();
+var config: Configuration = undefined;
 
-chunks: ChunkAllocator,
-root: *Property,
-generation: u64,
+pub const Configuration = struct {
+    chunks: ChunkAllocator,
+    root: *Property,
+    generation: u64,
+};
 
-pub fn init(self: *Properties, alloc: Allocator) !void {
-    self.* = .{
+pub fn init(alloc: Allocator) !void {
+    config = .{
         .generation = 0,
         .chunks = undefined,
         .root = undefined,
     };
 
-    try self.chunks.init(alloc, &.{
+    try config.chunks.init(alloc, &.{
         .{ .capacity = 128, .chunk_size = 8 },
         .{ .capacity = 128, .chunk_size = @sizeOf(Property) },
     });
-    errdefer self.chunks.deinit(alloc);
+    errdefer config.chunks.deinit();
 
-    self.root = try self.create("root");
+    config.root = try create("root");
 }
 
-pub fn deinit(self: *Properties, alloc: Allocator) void {
-    self.chunks.deinit(alloc);
+pub fn deinit() void {
+    config.chunks.deinit();
 }
 
-pub fn create(self: *Properties, str: []const u8) !*Property {
-    const chunks = self.chunks.allocator();
+pub fn create(str: []const u8) !*Property {
+    const chunks = config.chunks.allocator();
     const property = try chunks.create(Property);
 
     property.* = .{
         .str = try chunks.dupe(u8, str),
-        .id = self.generation,
+        .id = config.generation,
     };
 
-    self.generation += 1;
+    config.generation += 1;
 
     return property;
 }
 
-pub fn insert(self: *Properties, parent: ?*Property, str: []const u8) !*Property {
-    const property = try self.create(str);
+pub fn insert(parent: ?*Property, str: []const u8) !*Property {
+    const property = try create(str);
 
-    const p = parent orelse self.root;
+    const p = parent orelse config.root;
     p.childrens.append(property);
     property.parent = p;
 
     return property;
 }
 
-pub fn prune(self: *Properties, property: *Property) void {
+pub fn prune(property: *Property) void {
     var iter = property.childrens.iterator();
     while (iter.next()) |p| {
-        self.remove(p);
+        config.remove(p);
     }
 }
 
-pub fn replace(self: *Properties, proterty: *Property, str: []const u8) !void {
-    const chunks = self.chunks.allocator();
+pub fn replace(proterty: *Property, str: []const u8) !void {
+    const chunks = config.chunks.allocator();
     const dupe = try chunks.dupe(u8, str);
     chunks.free(proterty.str);
 
     proterty.str = dupe;
 }
 
-pub fn remove(self: *Properties, property: *Property) void {
-    const chunks = self.chunks.allocator();
+pub fn remove(property: *Property) void {
+    const chunks = config.chunks.allocator();
 
     if (property.parent) |p| {
         p.childrens.remove(property);
@@ -83,7 +85,7 @@ pub fn remove(self: *Properties, property: *Property) void {
 
     var iter = property.childrens.iterator();
     while (iter.next()) |p| {
-        self.remove(p);
+        config.remove(p);
     }
 
     chunks.destroy(property.str);
@@ -113,9 +115,9 @@ fn countKeys(comptime str: []const u8) usize {
     return count;
 }
 
-pub fn find(self: *Properties, comptime str: []const u8) ?*Property {
+pub fn find(comptime str: []const u8) ?*Property {
     const keys = parseKeys(str);
-    var current: *Property = self.root;
+    var current: *Property = config.root;
 
     inline for (keys) |key| {
         var found: ?*Property = null;
@@ -165,24 +167,23 @@ pub const Property = struct {
     }
 };
 
-test "Property tree" {
+test "Config tree" {
     const gpa = testing.allocator;
 
-    var properties: Properties = undefined;
-    try properties.init(gpa);
-    defer properties.deinit(gpa);
+    try init(gpa);
+    defer deinit();
 
-    const first = try properties.insert(null, "first");
-    _ = try properties.insert(first, "100");
+    const first = try insert(null, "first");
+    _ = try insert(first, "100");
 
-    const second = try properties.insert(null, "second");
-    const third = try properties.insert(second, "third");
+    const second = try insert(null, "second");
+    const third = try insert(second, "third");
 
-    try testing.expectEqual(2, properties.root.childrens.len());
+    try testing.expectEqual(2, config.root.childrens.len());
 
-    try testing.expectEqual(first, properties.root.get("first"));
-    try testing.expectEqual(second, properties.root.get("second"));
-    try testing.expectEqual(third, properties.find("second|third"));
+    try testing.expectEqual(first, config.root.get("first"));
+    try testing.expectEqual(second, config.root.get("second"));
+    try testing.expectEqual(third, find("second|third"));
 
     try testing.expectEqual(100, first.first().?.into(u8));
 }

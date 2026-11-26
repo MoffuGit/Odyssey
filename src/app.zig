@@ -20,14 +20,13 @@ const font = @import("font.zig");
 const renderer = @import("renderer.zig");
 const view = @import("view.zig");
 const win = @import("window.zig");
-const Properties = @import("properties.zig");
+const config = @import("config.zig");
 
 const log = std.log.scoped(.app);
 
 var app: App = undefined;
 
 const App = struct {
-    properties: Properties,
     io: Io,
     gpa: Allocator,
     arena: ArenaAllocator,
@@ -36,11 +35,15 @@ const App = struct {
     window_states: DoublyLinkedList(WindowState),
     collection: u64,
     frame: u64,
+    frame_arena: ArenaAllocator,
+    cmds: SinglyLinkedList(CommandNode),
+    quit: bool,
 };
 
 pub fn init(gpa: Allocator, io: Io) !void {
     app = .{
-        .properties = undefined,
+        .quit = false,
+        .frame_arena = .init(gpa),
         .collection = 0,
         .frame = 0,
         .io = io,
@@ -49,6 +52,7 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .chunks = undefined,
         .window_states = .empty,
         .display = undefined,
+        .cmds = .empty,
     };
 
     const inter = try font.fromBytes(embedded.geist_mono, 0);
@@ -64,15 +68,14 @@ pub fn init(gpa: Allocator, io: Io) !void {
         },
     });
 
-    try app.properties.init(arena);
-
-    try app.display.init(display, io);
+    try app.display.init(displayCallback, io);
     errdefer app.display.deinit();
 
     win.setEventCallback(.window_resized, windowResize);
 }
 
 pub fn deinit() void {
+    app.frame_arena.deinit();
     app.display.deinit();
     app.arena.deinit();
 }
@@ -81,8 +84,16 @@ pub fn run() !void {
     try app.display.run();
 }
 
-fn display() bool {
-    if (app.window_states.is_empty()) app.display.stop();
+pub fn displayCallback() bool {
+    display() catch |err| log.err("frame err={}", .{err});
+
+    return true;
+}
+
+pub fn display() !void {
+    if (app.quit) {
+        app.display.stop();
+    }
 
     win.poll();
     while (win.popEvent()) |evt| {
@@ -99,11 +110,32 @@ fn display() bool {
         }
     }
 
-    render() catch |err| {
-        log.err("Frame render err={}", .{err});
-    };
+    var iter = app.cmds.iterator();
+    while (iter.next()) |node| {
+        const cmd = node.command;
 
-    return true;
+        switch (cmd) {
+            .open_window => {
+                const chunks = app.chunks.allocator();
+                const window_state = try chunks.create(WindowState);
+                try window_state.init(.{
+                    .name = "Odyssey",
+                    .x = 0,
+                    .y = 0,
+                    .width = 800,
+                    .height = 600,
+                    .flags = win.WindowCenter | win.WindowFocus,
+                });
+
+                app.window_states.append(window_state);
+            },
+        }
+    }
+
+    try render();
+
+    _ = app.frame_arena.reset(.retain_capacity);
+    app.cmds = .empty;
 }
 
 fn windowResize(event: win.Event) void {
@@ -116,14 +148,6 @@ fn windowResize(event: win.Event) void {
     render() catch |err| {
         log.err("Frame render err={}", .{err});
     };
-}
-
-pub fn openWindow(opts: win.Options) !void {
-    const chunks = app.chunks.allocator();
-    const window_state = try chunks.create(WindowState);
-    try window_state.init(opts);
-
-    app.window_states.append(window_state);
 }
 
 pub fn render() !void {
@@ -285,8 +309,19 @@ pub fn render() !void {
             chunks.destroy(window_state);
         }
     }
+    if (app.window_states.len() == 0) app.quit = true;
 
     app.frame += 1;
+}
+
+pub fn pushCmd(cmd: Command) !void {
+    const arena = app.frame_arena.allocator();
+    const node = try arena.create(CommandNode);
+    node.* = .{
+        .command = cmd,
+    };
+
+    app.cmds.append(node);
 }
 
 pub const WindowState = struct {
@@ -326,4 +361,13 @@ pub const WindowState = struct {
         self.win.deinit();
         self.view.deinit();
     }
+};
+
+const CommandNode = struct {
+    next: ?*CommandNode = null,
+    command: Command,
+};
+
+const Command = union(enum) {
+    open_window,
 };

@@ -11,7 +11,7 @@ const datastruct = @import("datastruct.zig");
 const font = @import("font.zig");
 const global = @import("global.zig");
 const patch = @import("patch.zig");
-const Properties = @import("properties.zig");
+const config = @import("config.zig");
 const renderer = @import("renderer.zig");
 const scheduler = @import("scheduler.zig");
 const view = @import("view.zig");
@@ -39,17 +39,13 @@ pub fn main(init: std.process.Init) !void {
     try win.init("Odyssey", 0);
     defer win.deinit();
 
+    try config.init(gpa);
+    defer config.deinit();
+
     try app.init(gpa, io);
     defer app.deinit();
 
-    try app.openWindow(.{
-        .name = "Odyssey",
-        .x = 0,
-        .y = 0,
-        .width = 800,
-        .height = 600,
-        .flags = win.WindowCenter | win.WindowFocus,
-    });
+    try app.pushCmd(.open_window);
 
     try app.run();
 }
@@ -67,5 +63,5 @@ test {
     _ = ChunkedPath;
     _ = datastruct;
     _ = async;
-    _ = Properties;
+    _ = config;
 }
