@@ -33,7 +33,6 @@ pub const View = struct {
     frame: u64,
     frame_t: f32,
     frame_arenas: [2]heap.ArenaAllocator,
-    frame_chunks: [2]chunk_pool.ChunkAllocator,
 
     stacks: Stacks,
     pop_flags: u64,
@@ -58,7 +57,6 @@ pub const View = struct {
             .block_count = 0,
             .frame = 0,
             .frame_arenas = .{ .init(gpa), .init(gpa) },
-            .frame_chunks = undefined,
             .stacks = .empty,
             .pop_flags = 0,
             .chunks = undefined,
@@ -67,13 +65,6 @@ pub const View = struct {
 
         const arena = self.arena.allocator();
         errdefer self.arena.deinit();
-
-        for (&self.frame_chunks) |*chunk| {
-            try chunk.init(arena, &.{
-                .{ .capacity = 2048, .chunk_size = @sizeOf(Attribute) + @sizeOf(?*Attribute) },
-                .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
-            });
-        }
 
         try self.chunks.init(arena, &.{
             .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
@@ -89,9 +80,9 @@ pub const View = struct {
     }
 
     pub fn pushEvent(self: *View, evt: Event) void {
-        const chunks = self.frameChunks();
+        const arena = self.frameArena();
 
-        const node = chunks.create(EventNode) catch @panic("Chunk Overflow");
+        const node = arena.create(EventNode) catch @panic("Chunk Overflow");
 
         node.* = .{ .event = evt };
 
@@ -100,10 +91,6 @@ pub const View = struct {
 
     fn frameArena(self: *View) Allocator {
         return self.frame_arenas[self.frame % self.frame_arenas.len].allocator();
-    }
-
-    fn frameChunks(self: *View) Allocator {
-        return self.frame_chunks[self.frame % self.frame_arenas.len].allocator();
     }
 };
 
@@ -190,7 +177,6 @@ pub fn finish() void {
     const frame_index = local.frame % local.frame_arenas.len;
 
     _ = local.frame_arenas[frame_index].reset(.retain_capacity);
-    _ = local.frame_chunks[frame_index].reset();
 }
 
 pub fn sample(key: u64) ?f32 {
@@ -385,7 +371,7 @@ pub fn fmt(comptime format: []const u8, args: anytype) ![]u8 {
 }
 
 pub fn blk(options: Block.Options) *Block {
-    const frame_chunks = local.frameChunks();
+    const frame_arena = local.frameArena();
     const chunks = local.chunks.allocator();
 
     const cached = bkl: {
@@ -413,7 +399,7 @@ pub fn blk(options: Block.Options) *Block {
     };
 
     const block = if (cached) |c| c else bkl: {
-        const block = frame_chunks.create(Block) catch @panic("Block Chunk Overflow");
+        const block = frame_arena.create(Block) catch @panic("Block Chunk Overflow");
         block.* = .empty;
 
         break :bkl block;
@@ -460,13 +446,13 @@ pub fn blkEnd() void {
 }
 
 pub fn pushAttr(attr: Attribute) void {
-    const chunks = local.frameChunks();
+    const arena = local.frameArena();
 
     switch (attr) {
         inline else => |value, flag| {
             assert(local.pop_flags & stackFlag(flag) == 0);
 
-            const node = chunks.create(Node(flag)) catch @panic("Frame chunks overflow");
+            const node = arena.create(Node(flag)) catch @panic("Frame chunks overflow");
             node.* = .{ .value = value };
             local.stacks.prepend(flag, node);
         },
@@ -476,9 +462,7 @@ pub fn pushAttr(attr: Attribute) void {
 pub fn popAttr(comptime field: StackField) void {
     assert(local.pop_flags & stackFlag(field) == 0);
 
-    const chunks = local.frameChunks();
-    const node = local.stacks.pop(field) orelse unreachable;
-    chunks.destroy(node);
+    _ = local.stacks.pop(field) orelse unreachable;
 }
 
 pub fn popAttrs(comptime fields: []const StackField) void {
