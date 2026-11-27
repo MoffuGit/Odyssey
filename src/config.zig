@@ -6,7 +6,7 @@ const ChunkAllocator = @import("chunk_allocator.zig");
 const datastruct = @import("datastruct.zig");
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 
-const DELIMITER: u8 = '|';
+const DELIMITER: u8 = '.';
 
 var config: Configuration = undefined;
 
