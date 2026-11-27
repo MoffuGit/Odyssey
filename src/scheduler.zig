@@ -10,8 +10,6 @@ const testing = std.testing;
 const heap = std.heap;
 const asserts = std.debug.assert;
 
-const constants = @import("constants.zig");
-const MAX_CONTEXT_SIZE = constants.MAX_CONTEXT_SIZE;
 const datastruct = @import("datastruct.zig");
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const global = @import("global.zig");
