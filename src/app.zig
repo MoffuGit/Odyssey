@@ -5,9 +5,9 @@ const Io = std.Io;
 const assert = std.debug.assert;
 const testing = std.testing;
 
+const ChunkAllocator = @import("chunk_allocator.zig");
+const config = @import("config.zig");
 const core = @import("core.zig");
-const chunk_pool = @import("chunk_pool.zig");
-const ChunkAllocator = chunk_pool.ChunkAllocator;
 const datastruct = @import("datastruct.zig");
 const SinglyLinkedList = datastruct.SinglyLinkedList;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
@@ -20,7 +20,6 @@ const font = @import("font.zig");
 const renderer = @import("renderer.zig");
 const view = @import("view.zig");
 const win = @import("window.zig");
-const config = @import("config.zig");
 
 const log = std.log.scoped(.app);
 
@@ -49,7 +48,7 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .io = io,
         .gpa = gpa,
         .arena = .init(gpa),
-        .chunks = undefined,
+        .chunks = .init(gpa),
         .window_states = .empty,
         .display = undefined,
         .cmds = .empty,
@@ -57,16 +56,6 @@ pub fn init(gpa: Allocator, io: Io) !void {
 
     const inter = try font.fromBytes(embedded.geist_mono, 0);
     app.collection = try font.addCollection(&.{inter});
-
-    const arena = app.arena.allocator();
-    errdefer app.arena.deinit();
-
-    try app.chunks.init(arena, &.{
-        .{
-            .capacity = 50,
-            .chunk_size = @sizeOf(WindowState),
-        },
-    });
 
     try app.display.init(displayCallback, io);
     errdefer app.display.deinit();
@@ -78,6 +67,7 @@ pub fn deinit() void {
     app.frame_arena.deinit();
     app.display.deinit();
     app.arena.deinit();
+    app.chunks.deinit();
 }
 
 pub fn run() !void {

@@ -16,8 +16,6 @@ const c = @import("c");
 const macos = @import("macos");
 const objc = @import("objc");
 
-const chunk_pool = @import("chunk_pool.zig");
-const ChunkPool = chunk_pool.ChunkPool;
 const datastruct = @import("datastruct.zig");
 const Atlas = datastruct.Atlas;
 const SinglyLinkedList = datastruct.SinglyLinkedList;

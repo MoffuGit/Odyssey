@@ -12,8 +12,7 @@ const GitIgnore = @import("zlob").GitIgnore;
 const async = @import("async.zig");
 const attr = @import("attr.zig");
 const BulkAttr = attr.BulkAttr;
-const chunk_pool = @import("chunk_pool.zig");
-const ChunkAllocator = chunk_pool.ChunkAllocator;
+const ChunkAllocator = @import("chunk_allocator.zig");
 const ChunkedPath = @import("chunked_path.zig");
 const RANGE_NODE_SIZE = ChunkedPath.RANGE_NODE_SIZE;
 const CHUNK_SIZE = ChunkedPath.CHUNKS_SIZE;
@@ -50,18 +49,15 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .io = io,
         .gpa = gpa,
         .arena = .init(gpa),
-        .chunks = undefined,
+        .chunks = .init(gpa),
         .worktrees = undefined,
         .waker = undefined,
         .waker_c = .noop,
     };
     errdefer scanner.arena.deinit();
+    errdefer scanner.chunks.deinit();
 
     const arena = scanner.arena.allocator();
-
-    try scanner.chunks.init(arena, &.{
-        .{ .capacity = 128, .chunk_size = @sizeOf(Worktree) },
-    });
 
     try scanner.worktrees.init(64, .{}, arena);
 
@@ -80,6 +76,7 @@ pub fn deinit() void {
     }
 
     scanner.waker.deinit();
+    scanner.chunks.deinit();
     scanner.arena.deinit();
 }
 
@@ -156,7 +153,7 @@ pub const Snapshot = struct {
     ) !void {
         self.* = .{
             .arena = .init(gpa),
-            .chunks = undefined,
+            .chunks = .init(gpa),
             .abs_root = undefined,
             .root_name = undefined,
             .entries = undefined,
@@ -168,10 +165,6 @@ pub const Snapshot = struct {
 
         self.abs_root = try arena.dupe(u8, abs_path);
         self.root_name = try arena.dupe(u8, std.fs.path.basename(self.abs_root));
-
-        try self.chunks.init(arena, &.{
-            .{ .capacity = 1024 * 1024, .chunk_size = NODE_SIZE },
-        });
 
         try self.entries.init(self.chunks.allocator());
     }
@@ -187,21 +180,19 @@ pub const Snapshot = struct {
     pub fn clone(self: *const Snapshot, gpa: Allocator) !Snapshot {
         var copy: Snapshot = .{
             .arena = .init(gpa),
-            .chunks = undefined,
+            .chunks = .init(gpa),
             .entries = undefined,
             .abs_root = undefined,
             .root_name = undefined,
             .next_entry_id = .init(self.next_entry_id.load(.monotonic)),
         };
+        errdefer copy.chunks.deinit();
         errdefer copy.arena.deinit();
         const arena = copy.arena.allocator();
 
         copy.abs_root = try arena.dupe(u8, self.abs_root);
         copy.root_name = try arena.dupe(u8, self.root_name);
 
-        try copy.chunks.init(arena, &.{
-            .{ .capacity = 1024 * 1024, .chunk_size = NODE_SIZE },
-        });
         copy.entries = try self.entries.clone(copy.chunks.allocator());
 
         return copy;
@@ -209,6 +200,7 @@ pub const Snapshot = struct {
 
     pub fn deinit(self: *Snapshot) void {
         self.arena.deinit();
+        self.chunks.deinit();
     }
 
     const Entries = btree.BPlusTree(ChunkedPath, Entry, cmpPath);
@@ -265,7 +257,7 @@ const Worktree = struct {
             .last_generation = 0,
             .key = key,
             .arena = .init(gpa),
-            .chunks = undefined,
+            .chunks = .initThreadSafe(gpa, io),
             .mutex = .init,
             .snapshot = undefined,
             .status = .scanning,
@@ -275,20 +267,10 @@ const Worktree = struct {
             .stopped = .init(false),
         };
         errdefer self.arena.deinit();
+        errdefer self.chunks.deinit();
 
         try self.snapshot.init(abs_path, gpa);
         errdefer self.snapshot.deinit();
-
-        try self.chunks.initThreadSafe(
-            self.arena.allocator(),
-            &.{
-                .{ .capacity = 1024 * 1024 * 1024, .chunk_size = RANGE_NODE_SIZE },
-                .{ .capacity = 1024 * 1024 * 1024, .chunk_size = CHUNK_SIZE },
-                .{ .capacity = 1024 * 1024 * 2, .chunk_size = @max(@sizeOf(EntryData), @sizeOf(ScannerTask)) },
-                .{ .capacity = 1024 * 1024, .chunk_size = @sizeOf(SharedFd) },
-            },
-            io,
-        );
 
         const chunks = self.chunks.threadSafeAllocator();
 
@@ -309,6 +291,7 @@ const Worktree = struct {
 
         self.snapshot.deinit();
         self.arena.deinit();
+        self.chunks.deinit();
     }
 
     fn stop(self: *Worktree) void {

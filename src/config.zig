@@ -2,8 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
-const chunk_pool = @import("chunk_pool.zig");
-const ChunkAllocator = chunk_pool.ChunkAllocator;
+const ChunkAllocator = @import("chunk_allocator.zig");
 const datastruct = @import("datastruct.zig");
 const DoublyLinkedList = datastruct.DoublyLinkedList;
 
@@ -17,17 +16,13 @@ pub const Configuration = struct {
     generation: u64,
 };
 
-pub fn init(alloc: Allocator) !void {
+pub fn init(gpa: Allocator) !void {
     config = .{
         .generation = 0,
-        .chunks = undefined,
+        .chunks = .init(gpa),
         .root = undefined,
     };
 
-    try config.chunks.init(alloc, &.{
-        .{ .capacity = 128, .chunk_size = 8 },
-        .{ .capacity = 128, .chunk_size = @sizeOf(Property) },
-    });
     errdefer config.chunks.deinit();
 
     config.root = try create("root");

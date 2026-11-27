@@ -9,7 +9,7 @@ const meta = std.meta;
 const testing = std.testing;
 const Wyhash = std.hash.Wyhash;
 
-const chunk_pool = @import("chunk_pool.zig");
+const ChunkAllocator = @import("chunk_allocator.zig");
 const datastruct = @import("datastruct.zig");
 const HashTable = datastruct.HashTable;
 const DoublyLinkedList = datastruct.DoublyLinkedList;
@@ -25,7 +25,7 @@ threadlocal var local: *View = undefined;
 
 pub const View = struct {
     arena: heap.ArenaAllocator,
-    chunks: chunk_pool.ChunkAllocator,
+    chunks: ChunkAllocator,
     mouse: [2]f32,
     block_count: u64,
     root: ?*Block,
@@ -59,17 +59,15 @@ pub const View = struct {
             .frame_arenas = .{ .init(gpa), .init(gpa) },
             .stacks = .empty,
             .pop_flags = 0,
-            .chunks = undefined,
+            .chunks = .init(gpa),
             .active_animations = .empty,
         };
 
         const arena = self.arena.allocator();
         errdefer self.arena.deinit();
 
-        try self.chunks.init(arena, &.{
-            .{ .capacity = 2048, .chunk_size = @sizeOf(Block) },
-            .{ .capacity = 2048, .chunk_size = @sizeOf(Animation) },
-        });
+        errdefer self.chunks.deinit();
+
         try self.block_cache.init(2048, .{}, arena);
         try self.animation_cache.init(2048, .{}, arena);
     }
@@ -77,6 +75,7 @@ pub const View = struct {
     pub fn deinit(self: *View) void {
         for (self.frame_arenas) |arena| arena.deinit();
         self.arena.deinit();
+        self.chunks.deinit();
     }
 
     pub fn pushEvent(self: *View, evt: Event) void {

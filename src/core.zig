@@ -7,8 +7,7 @@ const testing = std.testing;
 const async = @import("async.zig");
 const global = @import("global.zig");
 const Bench = @import("bench.zig");
-const chunk_pool = @import("chunk_pool.zig");
-const ChunkAllocator = chunk_pool.ChunkAllocator;
+const ChunkAllocator = @import("chunk_allocator.zig");
 const datastruct = @import("datastruct.zig");
 const queue = datastruct.queue;
 const slotmap = datastruct.slotmap;
@@ -53,7 +52,8 @@ pub const Core = struct {
 pub fn init(gpa: Allocator, io: Io) !void {
     core = .{
         .gpa = gpa,
-        .chunks = undefined,
+        .chunks = .init(gpa),
+        .arena = .init(gpa),
         .worktree_cache = undefined,
         .frame = 0,
         .messages = undefined,
@@ -62,7 +62,6 @@ pub fn init(gpa: Allocator, io: Io) !void {
         .stop_c = .noop,
         .wakeup = undefined,
         .wakeup_c = .noop,
-        .arena = .init(gpa),
         .loop = undefined,
         .future = undefined,
         .entities = undefined,
@@ -74,11 +73,6 @@ pub fn init(gpa: Allocator, io: Io) !void {
 
     const arena = core.arena.allocator();
     errdefer core.arena.deinit();
-
-    try core.chunks.init(
-        arena,
-        &.{.{ .capacity = 128, .chunk_size = @sizeOf(WorktreeCache) }},
-    );
 
     core.events = try .init(128, arena);
     core.messages = try .init(128, arena);
@@ -129,20 +123,6 @@ pub fn init(gpa: Allocator, io: Io) !void {
     core.future = future;
 }
 
-fn run(started: *Io.Event, result: *anyerror!void) void {
-    scanner.init(core.gpa, core.io) catch |err| {
-        result.* = err;
-        started.set(core.io);
-        return;
-    };
-
-    started.set(core.io);
-
-    core.loop.run(.until_done) catch |err| {
-        log.err("Loop err={}", .{err});
-    };
-}
-
 pub fn deinit() void {
     core.stop.wake() catch {};
     core.future.await(core.io);
@@ -173,6 +153,21 @@ pub fn deinit() void {
 
     core.frame_arena.deinit();
     core.arena.deinit();
+    core.chunks.deinit();
+}
+
+fn run(started: *Io.Event, result: *anyerror!void) void {
+    scanner.init(core.gpa, core.io) catch |err| {
+        result.* = err;
+        started.set(core.io);
+        return;
+    };
+
+    started.set(core.io);
+
+    core.loop.run(.until_done) catch |err| {
+        log.err("Loop err={}", .{err});
+    };
 }
 
 fn wakeupCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool {
