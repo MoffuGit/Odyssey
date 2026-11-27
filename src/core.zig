@@ -195,6 +195,7 @@ fn wakeupCallback(_: *async.Completion, _: *async.Loop, res: anyerror!void) bool
 pub fn flush() !void {
     var buffer: [128]Event = undefined;
     const len = core.events.pop(&buffer);
+    const chunks = core.chunks.allocator();
 
     for (buffer[0..len]) |evt| {
         switch (evt) {
@@ -208,7 +209,7 @@ pub fn flush() !void {
                     entry.snapshot.deinit();
                     break :blk entry;
                 } else blk: {
-                    const entry = core.chunks.allocator().create(WorktreeCache) catch |err| {
+                    const entry = chunks.create(WorktreeCache) catch |err| {
                         snapshot.deinit();
                         return err;
                     };
@@ -236,7 +237,6 @@ pub fn flush() !void {
                 try pushMsg(.{ .open_worktree = .{ .key = key, .abs_path = path } });
             },
             .close_worktree => |key| {
-                const chunks = core.chunks.allocator();
                 const entity = core.entities.get(key) orelse continue;
 
                 if (core.worktree_cache.remove(key)) |cached| {
