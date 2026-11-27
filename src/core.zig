@@ -202,10 +202,7 @@ pub fn flush() !void {
             .worktree => |data| {
                 var snapshot = data.snapshot;
 
-                if (core.entities.get(data.key) == null) {
-                    snapshot.deinit();
-                    return;
-                }
+                if (core.entities.get(data.key) == null) snapshot.deinit();
 
                 const entry = if (core.worktree_cache.get(data.key)) |entry| blk: {
                     entry.snapshot.deinit();
